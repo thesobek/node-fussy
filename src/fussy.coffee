@@ -1,5 +1,6 @@
 fs        = require 'fs'
 thesaurus = require 'thesaurus'
+mongojs   = require 'mongojs'
 
 debug = ->
 
@@ -37,11 +38,82 @@ ngramize = (words, n) ->
 
 
 
-class exports.Engine
+class MongoEngine
+  constructor: (url, opts={}) ->
+    debug "connecting to mongodb at #{url}"
+    @mongodb = new mongojs opts, ['fussy']
+
+    @stringSize = opts.stringSize ? [0, 30]
+    @ngramSize  = opts.ngramSize ? 2
+    @debug      = opts.debug ? no
+    debug       = if @debug then console.log else ->
+    @profiles   = opts.profiles ? {}
+
+  pushEvent: (event, cb) ->
+
+    if event.signal is NEUTRAL
+      debug "signal is neutral, ignoring"
+      return
+
+    # analyze the content
+    if !@profiles[event.profile]?
+      debug "creating profile for #{event.profile}"
+      @profiles[event.profile] = {}
+
+
+    # pretty straightfoward
+    changed = content: 0, synonyms: 0
+
+    # our dataset contains two collections:
+    # raw words, and synonyms
+
+    facets = []
+    for facet, _ of ngramize event.content, @ngramSize
+      continue unless @stringSize[0] < facet.length < @stringSize[1]
+      facets.push facet unless facet in facets
+      changed.content++
+
+    # use external data to improve results
+    # TODO: use TF-IDF to further refine the filter,
+    # are remove over-used words
+    for synonym in enrich event.content.split(' ')
+      for facet, _ of ngramize synonym, @ngramSize
+        continue unless @stringSize[0] < facet.length < @stringSize[1]
+        facets.push facet unless facet in facets
+        changed.synonyms++
+
+    debug "#{if event.signal > 0 then 'reinforced' else 'weakened'} #{JSON.stringify changed} facets"
+
+    debug "saving using mongodb"
+    query = profile: 'test_profile'
+    update = $inc: facets: $in: facets
+    params = multi: yes
+    if cb?
+      @mongodb.fussy.update query, update, params, -> cb()
+    else
+      @mongodb.fussy.update query, update, params, -> # ignored
+    yes
+
+
+  # lighten the database, removing weak connections (neither strongly positive or negative)
+  prune: (min, max) ->
+    for profile, facets of @profiles
+      for facet, _ of facets
+        facets[facet] = facets[facet] - 1
+        if min < facets[facet] < max
+          delete facets[facet]
+
+  # return scores for a single person, to see if she would like the content
+  matchOne: (id, content) ->
+
+  # return the top N users who may be interested in the content
+  matchAll: (content, N) ->
+
+  save: ->
+
+
+class MemoryEngine
   constructor: (opts={}) ->
-    if isString opts
-      debug "loading '#{opts}'.."
-      opts = JSON.parse fs.readFileSync opts, 'utf8'
     @stringSize = opts.stringSize ? [0, 30]
     @ngramSize  = opts.ngramSize ? 2
     @debug      = opts.debug ? no
@@ -101,7 +173,6 @@ class exports.Engine
   matchAll: (content, N) ->
 
   save: (filePath) ->
-    throw "Error, no file path given" unless filePath?
     # the code is written using appendFileSync, this is not pretty
     # but when exporting huge database it allows us to see the progression line by line
     # eg. using "watch ls -l" or "tail -f file.json" on unix
@@ -120,5 +191,16 @@ class exports.Engine
         write """      "#{facet}": #{weight}#{if --remaining_facets > 0 then ',' else ''}"""
       write """    }#{if --remaining_profiles > 0 then ',' else ''}"""
     write """  }\n}"""
+
+
+exports.Engine = (opts={}, extra={}) ->
+  if isString opts
+    if opts.substring(0,8) is "mongo://"
+      new MongoEngine opts, extra
+    else
+      debug "loading '#{opts}'.."
+      new MemoryEngine JSON.parse fs.readFileSync opts, 'utf8'
+  else
+    new MemoryEngine opts
 
 
