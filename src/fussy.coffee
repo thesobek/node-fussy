@@ -1,5 +1,4 @@
 fs        = require 'fs'
-thesaurus = require 'thesaurus'
 {pick}    = require 'deck'
 
 debug = ->
@@ -11,56 +10,11 @@ P = (p=0.5) -> + (Math.random() < p)
 replaceAll = (find, replace, str) ->
    str.replace(new RegExp(find, 'g'), replace)
 
-exports.cleanContent = cleanContent = (content) -> 
-  content.replace(/(?:\.|\?|!)+/g, '.').replace(/\s+/g, ' ').replace(/(?:\\n)+/g, '').replace(/\n+/g, '')
-
-enrich = (words) ->
-  moreWords = []
-  for word in words
-    similarWords = thesaurus.find word
-
-    if similarWords.length
-      # ignore words with too many different meanings, for complexity's sake
-      continue if similarWords.length > 3
-
-      # only add up to 4 similar words
-      for similarWord in similarWords[...3]
-
-        # ignore words too small or too large
-        continue unless 2 < similarWord.length < 13
-
-        # ignore synonyms already added
-        continue if similarWord in moreWords
-
-        moreWords.push similarWord 
-
-    # no synonym found.. maybe a number?
-    else
-      test = (Number) word
-      continue unless (not isNaN(test) and isFinite(test))
-
-      categories = [
-        10, 20, 30, 40, 50, 60, 70, 80, 90,
-        100, 200, 300, 400, 500, 600, 700, 800, 900,
-        1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 
-        10000
-      ]
-      for category in categories
-        if test < category
-          moreWords.push "less_than_#{category}"
-          break
-
-      for category in categories.reverse()
-        if test > category
-          moreWords.push "more_than_#{category}"
-          break
-    
-
-  moreWords
-
 POSITIVE = exports.POSITIVE = +1
 NEGATIVE = exports.NEGATIVE = -1
 NEUTRAL  = exports.NEUTRAL  = 0
+
+emptyThesaurus = find: -> []
 
 # Extract n-grams from a string, returns a map
 _ngramize = (words, n) ->
@@ -85,8 +39,42 @@ _ngramize = (words, n) ->
   grams
 
 ngramize = (words, n) -> 
+  ngrams = {}
   for ngram in Object.keys _ngramize words, n
-    ngram.split(",").sort().toString()
+    # small ngrams are weaker than big ones
+    ngrams[ngram.split(",").sort().toString()] = (ngram.length / n)
+  ngrams
+  
+numerize = (sentence) ->
+  numeric = {}
+  for word in sentence.split " "
+    test = (Number) word
+    continue unless (not isNaN(test) and isFinite(test))
+
+    categories = [
+      10, 20, 30, 40, 50, 60, 70, 80, 90,
+      100, 200, 300, 400, 500, 600, 700, 800, 900,
+      1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 
+      10000
+    ]
+    for category in categories
+      if test < category
+        numeric["less_than_#{category}"] = 0.5 # TODO compute some distance weight
+        break
+
+    for category in categories.reverse()
+      if test > category
+        numeric["more_than_#{category}"] = 0.5 # TODO compute some distance weight
+        break
+  numeric
+  
+cleanContent = (content) -> 
+  content = content.replace(/(&[a-zA-Z]+;|\\t)/g, ' ')
+  content = content.replace(/(?:\.|\?|!)+/g, '.')
+  content = content.replace(/\s+/g, ' ')
+  content = content.replace(/(?:\\n)+/g, '')
+  content = content.replace(/\n+/g, '')
+  content
 
 class exports.Engine
   constructor: (opts={}) ->
@@ -99,27 +87,35 @@ class exports.Engine
     @sampling   = opts.sampling ? 0.3
     debug       = if @debug then console.log else ->
     @profiles   = opts.profiles ? {}
+    @network    = opts.network ? {}
 
 
-  multiplyFacets: (content, facets=[]) ->
+  # magic function that does everything
+  extractFacetsFromRawContent: (raw) ->
 
-    words = content.split ' '
+    content = cleanContent raw
 
-    for a in facets
-      for b in facets
-        facet = [a,b].sort().toString()
-        continue if a is b
-        continue unless P @sampling
-        facets.push facet
+    ngrams = {}
 
-    # find extra facets using a synonym database
-    for synonym in enrich words
-      for facet in @ngramize synonym
-        facets.push facet
+    for k,v of ngramize content, @ngramSize
+      ngrams[k] = v
+
+    for k,v of numerize content
+      ngrams[k] = v
+
+    facets = {}
+    for ngram, ngram_weight of ngrams
+      word = ngram.split(',').join(' ')
+      # filter
+      continue unless @stringSize[0] < word.length < @stringSize[1]
+
+      if word of @network
+        for synonym, synonym_weight of @network[word]
+          continue if synonym of facets # but here we do not overwrite ngrams!
+          facets[synonym] = ngram_weight * synonym_weight
+       
+      facets[word] = ngram_weight # this will overwrite synonyms, if any, but we don't care
     facets
-
-  ngramize: (words) ->
-    ngramize words, @ngramSize
 
   pushEvent: (event) ->
 
@@ -136,16 +132,9 @@ class exports.Engine
 
     debug "updating profile #{event.profile}.."
 
-    content = cleanContent event.content
-
-    alreadyAdded = {}
-    for facet in @multiplyFacets content, @ngramize content
-
-      # filter
-      continue unless @stringSize[0] < facet.length < @stringSize[1]
-      continue if facet of alreadyAdded
-
-      alreadyAdded[facet] = profile[facet] = event.signal + (profile[facet] ? 0)
+    # new sum
+    for facet, weight of @extractFacetsFromRawContent event.content
+      profile[facet] = event.signal * weight + (profile[facet] ? 0)
     
     @
 
@@ -168,18 +157,13 @@ class exports.Engine
     limit = opts.limit
     results = []
 
-    content = cleanContent content
-
-    facets = []
-    for facet in @multiplyFacets content, @ngramize content
-      continue if facet in facets
-      facets.push facet
-
+    facets = @extractFacetsFromRawContent content
+    
     for id, profile of @profiles
       continue if filter.length and id not in filter
       score = 0
-      for facet in facets
-        score += profile[facet] ? 0
+      for facet, weight of facets
+        score += weight * (profile[facet] ? 0)
       results.push [id, score]
 
       continue unless limit?
@@ -197,11 +181,8 @@ class exports.Engine
     id = 0
     for content in contents
       score = 0
-      alreadyAdded = {}
-      for facet in @multiplyFacets content, @ngramize content
-        continue if facet of alreadyAdded
-        score += profile[facet] ? 0
-        alreadyAdded[facet] = yes
+      for facet, weight of @extractFacetsFromRawContent content
+        score += weight * (profile[facet] ? 0)
       top.push [content, score]
     top.sort (a, b) -> b[1] - a[1]
     top
