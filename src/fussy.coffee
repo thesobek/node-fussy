@@ -42,9 +42,10 @@ ngramize = (words, n) ->
   ngrams = {}
   for ngram in Object.keys _ngramize words, n
     # small ngrams are weaker than big ones
-    ngrams[ngram.split(",").sort().toString()] = (ngram.length / n)
+    splitted = ngram.split ","
+    ngrams[splitted.join(" ").toString()] = (splitted.length / n)
   ngrams
-  
+
 numerize = (sentence) ->
   numeric = {}
   for word in sentence.split " "
@@ -88,6 +89,12 @@ class exports.Engine
     debug       = if @debug then console.log else ->
     @profiles   = opts.profiles ? {}
     @network    = opts.network ? {}
+    @database   = do -> 
+      uri = opts.database ? "://"
+      [backend, params] = uri.split "://"
+      if backend is 'redis'
+        debug "redis not supported yet, but no big deal."
+
 
 
   # magic function that does everything
@@ -105,16 +112,16 @@ class exports.Engine
 
     facets = {}
     for ngram, ngram_weight of ngrams
-      word = ngram.split(',').join(' ')
-      # filter
-      continue unless @stringSize[0] < word.length < @stringSize[1]
 
-      if word of @network
-        for synonym, synonym_weight of @network[word]
+      # filter
+      continue unless @stringSize[0] < ngram.length < @stringSize[1]
+
+      if ngram of @network
+        for synonym, synonym_weight of @network[ngram]
           continue if synonym of facets # but here we do not overwrite ngrams!
           facets[synonym] = ngram_weight * synonym_weight
        
-      facets[word] = ngram_weight # this will overwrite synonyms, if any, but we don't care
+      facets[ngram] = ngram_weight # this will overwrite synonyms, if any, but we don't care
     facets
 
   pushEvent: (event) ->
