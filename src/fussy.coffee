@@ -43,7 +43,7 @@ ngramize = (words, n) ->
   for ngram in Object.keys _ngramize words, n
     # small ngrams are weaker than big ones
     splitted = ngram.split ","
-    ngrams[splitted.join(" ").toString()] = (splitted.length / n)
+    ngrams[splitted.join(" ").toString()] = 1 # (splitted.length / n)
   ngrams
 
 numerize = (sentence) ->
@@ -60,22 +60,30 @@ numerize = (sentence) ->
     ]
     for category in categories
       if test < category
-        numeric["less_than_#{category}"] = 0.5 # TODO compute some distance weight
+        numeric["less_than_#{category}"] = 1 # 0.5 # TODO compute some distance weight
         break
 
     for category in categories.reverse()
       if test > category
-        numeric["more_than_#{category}"] = 0.5 # TODO compute some distance weight
+        numeric["more_than_#{category}"] = 1 # 0.5 # TODO compute some distance weight
         break
   numeric
   
 cleanContent = (content) -> 
   content = content.replace(/(&[a-zA-Z]+;|\\t)/g, ' ')
-  content = content.replace(/(?:\.|\?|!)+/g, '.')
+  content = content.replace(/(?:\.|\?|!|\:|;|,)+/g, '.')
   content = content.replace(/\s+/g, ' ')
   content = content.replace(/(?:\\n)+/g, '')
   content = content.replace(/\n+/g, '')
   content
+
+contentToSentences = (content) ->
+  sentences = []
+  for sent in content.split "."
+    sent = sent.trim()
+    if sent.length > 2
+      sentences.push sent
+  sentences
 
 class exports.Engine
   constructor: (opts={}) ->
@@ -100,15 +108,20 @@ class exports.Engine
   # magic function that does everything
   extractFacetsFromRawContent: (raw) ->
 
+    usePonderation = no
+
     content = cleanContent raw
+
+    sentences = contentToSentences content
 
     ngrams = {}
 
-    for k,v of ngramize content, @ngramSize
-      ngrams[k] = v
+    for sentence in sentences
+      for k,v of ngramize sentence, @ngramSize
+        ngrams[k] = v
 
-    for k,v of numerize content
-      ngrams[k] = v
+      for k,v of numerize sentence
+        ngrams[k] = v
 
     facets = {}
     for ngram, ngram_weight of ngrams
@@ -116,15 +129,26 @@ class exports.Engine
       # filter
       continue unless @stringSize[0] < ngram.length < @stringSize[1]
 
+      # TODO IMPORTANT
+      # quand plusieurs concepts sont deja présent, le poids des éléments synonymes restant est + important
+
+      # TODO IMPORTANT
+      # itérer plusieurs fois, sur les synonymes, pour que les synonymes de sysnonymes puisse
+      # eux-même activer des concepts
+      # ex un achat de marinère bleue + un achat de culotte bleue -> le synonyme "enfant" est partagé
+
       if ngram of @network
         for synonym, synonym_weight of @network[ngram]
-          continue if synonym of facets # but here we do not overwrite ngrams!
-          facets[synonym] = ngram_weight * synonym_weight
+          #continue if synonym of facets # but here we do not overwrite ngrams!
+          if usePonderation
+            facets[synonym] = ngram_weight * synonym_weight  + (facets[synonym] ? 0)
+          else
+            facets[synonym] = 1 +  (facets[synonym] ? 0)
        
-      facets[ngram] = ngram_weight # this will overwrite synonyms, if any, but we don't care
+      facets[ngram] = ngram_weight + (facets[ngram] ? 0) # this will overwrite synonyms, if any, but we don't care
     facets
 
-  pushEvent: (event) ->
+  store: (event) ->
 
     if event.signal is NEUTRAL
       debug "signal is neutral, ignoring"
