@@ -129,14 +129,6 @@ class exports.Engine
       # filter
       continue unless @stringSize[0] < ngram.length < @stringSize[1]
 
-      # TODO IMPORTANT
-      # quand plusieurs concepts sont deja présent, le poids des éléments synonymes restant est + important
-
-      # TODO IMPORTANT
-      # itérer plusieurs fois, sur les synonymes, pour que les synonymes de sysnonymes puisse
-      # eux-même activer des concepts
-      # ex un achat de marinère bleue + un achat de culotte bleue -> le synonyme "enfant" est partagé
-
       if ngram of @network
         for synonym, synonym_weight of @network[ngram]
           #continue if synonym of facets # but here we do not overwrite ngrams!
