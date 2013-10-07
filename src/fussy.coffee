@@ -1,14 +1,12 @@
 fs        = require 'fs'
 {pick}    = require 'deck'
-
+{ngramize, numerize, cleanContent, contentToSentences} = require './textutils'
+  
 debug = ->
 
 isString = (obj) -> !!(obj is '' or (obj and obj.charCodeAt and obj.substr))
 
 P = (p=0.5) -> + (Math.random() < p)
-
-replaceAll = (find, replace, str) ->
-   str.replace(new RegExp(find, 'g'), replace)
 
 POSITIVE = exports.POSITIVE = +1
 NEGATIVE = exports.NEGATIVE = -1
@@ -16,74 +14,38 @@ NEUTRAL  = exports.NEUTRAL  = 0
 
 emptyThesaurus = find: -> []
 
-# Extract n-grams from a string, returns a map
-_ngramize = (words, n) ->
-  unless Array.isArray words
-    words = for w in words.split ' '
-      continue if w.length < 3
-      w
 
-  grams = {}
-  if n < 2
-    for w in words
-      grams["#{w}"] = if Array.isArray(w) then w else [w]
-    return grams
-  for i in [0...words.length]
-    gram = words[i...i+n]
-    subgrams = _ngramize gram, n - 1
-    for k,v of subgrams
-      grams[k] = v
-    if i > words.length - n
-      break
-    grams["#{gram}"] = gram
-  grams
+class Facets
+  constructor: (opts={}) ->
+    @facets = opts.facets ? {}
+    @stringSize = opts.stringSize ? [0, 30]
+    @network = opts.network ? {}
 
-ngramize = (words, n) -> 
-  ngrams = {}
-  for ngram in Object.keys _ngramize words, n
-    # small ngrams are weaker than big ones
-    splitted = ngram.split ","
-    ngrams[splitted.join(" ").toString()] = 1 # (splitted.length / n)
-  ngrams
+  put: (facet, weight=1) ->
+    if @stringSize[0] < facet.length < @stringSize[1]
+      @facets[facet] = 1 #weight + (@facets[facet] ? 0)
+    @
 
-numerize = (sentence) ->
-  numeric = {}
-  for word in sentence.split " "
-    test = (Number) word
-    continue unless (not isNaN(test) and isFinite(test))
+  resonate: (times=5) ->
+    for i in [0...times]
+      debug " - resonate #{i}"
+      for facet_a, weight_a of @facets
+        facet_a = facet_a.toLowerCase()
+        for facet_b, weight_b of @network[facet_a] ? {}
+          @facets[facet_b] = weight_a * weight_b  + (@facets[facet_b] ? 0)
+    @
 
-    categories = [
-      10, 20, 30, 40, 50, 60, 70, 80, 90,
-      100, 200, 300, 400, 500, 600, 700, 800, 900,
-      1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 
-      10000
-    ]
-    for category in categories
-      if test < category
-        numeric["less_than_#{category}"] = 1 # 0.5 # TODO compute some distance weight
-        break
+  explore: (times=5) ->
+    for i in [0...times]
+      #ebug " - explore #{i}"
+      for facet_a, weight_a of @facets
+        facet_a = facet_a.toLowerCase()
+        for facet_b, weight_b of @network[facet_a] ? {}
+          @facets[facet_b] = 1
+    @
 
-    for category in categories.reverse()
-      if test > category
-        numeric["more_than_#{category}"] = 1 # 0.5 # TODO compute some distance weight
-        break
-  numeric
-  
-cleanContent = (content) -> 
-  content = content.replace(/(&[a-zA-Z]+;|\\t)/g, ' ')
-  content = content.replace(/(?:\.|\?|!|\:|;|,)+/g, '.')
-  content = content.replace(/\s+/g, ' ')
-  content = content.replace(/(?:\\n)+/g, '')
-  content = content.replace(/\n+/g, '')
-  content
-
-contentToSentences = (content) ->
-  sentences = []
-  for sent in content.split "."
-    sent = sent.trim()
-    if sent.length > 2
-      sentences.push sent
-  sentences
+  dump: ->
+    @facets
 
 class exports.Engine
   constructor: (opts={}) ->
@@ -108,37 +70,24 @@ class exports.Engine
   # magic function that does everything
   extractFacetsFromRawContent: (raw) ->
 
-    usePonderation = no
+    sentences = contentToSentences cleanContent raw
 
-    content = cleanContent raw
-
-    sentences = contentToSentences content
-
-    ngrams = {}
+    facets = new Facets
+      stringSize: @stringSize
+      network: @network
 
     for sentence in sentences
-      for k,v of ngramize sentence, @ngramSize
-        ngrams[k] = v
+      for facet, weight of ngramize sentence, @ngramSize
+        facets.put facet, weight
 
-      for k,v of numerize sentence
-        ngrams[k] = v
+      for facet, weight of numerize sentence
+        facets.put facet, weight
 
-    facets = {}
-    for ngram, ngram_weight of ngrams
-
-      # filter
-      continue unless @stringSize[0] < ngram.length < @stringSize[1]
-
-      if ngram of @network
-        for synonym, synonym_weight of @network[ngram]
-          #continue if synonym of facets # but here we do not overwrite ngrams!
-          if usePonderation
-            facets[synonym] = ngram_weight * synonym_weight  + (facets[synonym] ? 0)
-          else
-            facets[synonym] = 1 +  (facets[synonym] ? 0)
-       
-      facets[ngram] = ngram_weight + (facets[ngram] ? 0) # this will overwrite synonyms, if any, but we don't care
-    facets
+    # resonate N times
+    #facets.resonate 3
+    facets.explore 3
+ 
+    facets.dump()
 
   store: (event) ->
 
