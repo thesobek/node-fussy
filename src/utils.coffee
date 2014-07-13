@@ -208,11 +208,14 @@ exports.loadSchema = loadSchema = (schema) ->
 private function, used to parse a CSV row
 TODO FIXME rename to something like parseCSVRow?
 ###
-parse = (schema, row) ->
+exports.parse = parse = (schema, row) ->
 
   columns = []
 
   columns = csvString.parse(row)[0]
+
+  #console.log columns
+  #console.log columns.length
 
   if columns.length > schema.length
     throw "invalid columns length (#{columns.length}), does not match schema (#{schema.length})"
@@ -264,15 +267,6 @@ parse = (schema, row) ->
 
   facts
 
-exports.parseOne = parseOne = (schema, row) ->
-  schema = loadSchema schema
-  parse schema, row
-
-exports.parseMany = parseMany = (schema, rows) ->
-  schema = loadSchema schema
-  for row in rows
-    parse schema, row
-
 
 ###
 Loads a JSON file
@@ -281,7 +275,6 @@ TODO FIXME This function is a bit of a callback hell!
 ###
 exports.loadJSON = loadJSON = (filePath, cb) ->
   execDir = process.cwd()
-
 
   execPath =  execDir + '/' + filePath
 
@@ -331,47 +324,3 @@ exports.loadJSON = loadJSON = (filePath, cb) ->
       return _load scriptPath
 
     return {}
-
-###
-Load a CSV file, from a filepath
-
-This function assumes rows have '\n' line returns
-###
-exports.loadCSV = loadCSV = (filePath) ->
-  # init the event parser
-  dataset = []
-  for row in fs.readFileSync(filePath).toString().split("\n")
-    if row.length
-      dataset.push row
-  dataset
-
-###
-Shuffle an Array
-###
-exports.shuffle = deck.shuffle
-
-###
-TODO FIXME OBSOLETE
-###
-exports.randomizeCSV = randomizeCSV = (filePath) ->
-  # init the event parser
-  dataset = loadCSV filePath
-  deck.shuffle dataset
-
-###
-High-level function, to load a dataset (eg. CSV) using a schema,
-with optional "from" and "to" indexes, used like this: array[from...to]
-###
-exports.dataset = dataset = (uri, schema, from, to) ->
-  data = loadCSV uri
-
-  splice = if from and to
-      data[from...to]
-    else if from
-      data[from...]
-    else if to
-      data[...to]
-    else
-      data
-
-  parseMany schema, splice

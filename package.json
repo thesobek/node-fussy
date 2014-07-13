@@ -1,7 +1,7 @@
 {
   "name": "fussy",
   "description": "Json prediction and recommendation engine",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "author": "Julian Bilcke <julian.bilcke@gmail.com>",
   "scripts": {
     "test": "node_modules/mocha/bin/mocha --bail --require chai --compilers coffee:coffee-script test/*.coffee",
@@ -21,7 +21,14 @@
     "colors": "^0.6.2",
     "csv-string": "^2.1.1",
     "moment": "^2.5.1",
-    "progressbar": "^1.0.3"
+    "progressbar": "^1.0.3",
+    "async": "^0.9.0",
+    "ya-csv": "^0.9.3",
+    "mongodb": "^1.4.7",
+    "lazy.js": "^0.3.2",
+    "unzip": "^0.1.9",
+    "mime": "^1.2.11",
+    "mongo-sync": "^0.2.4"
   },
   "devDependencies": {
     "coffee-script": "^1.7.1",

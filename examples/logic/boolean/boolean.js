@@ -1,8 +1,7 @@
 var Fussy = require('fussy');
 
-console.log(
-  new Fussy()
-  .import('truth-table.csv', ['rule', 'P', 'Q', 'R'])
+Fussy
+  .open('file://truth-table.csv', ['rule','P','Q','R'])
   .query({
     select: 'rule',
     where: [
@@ -11,5 +10,6 @@ console.log(
         { P: 'F', Q: 'T', R: 'T' },
         { P: 'F', Q: 'F', R: 'T' }
     ]
-  }).all()
-)
+  }).all().each(function(item){
+    console.log(item)
+  })

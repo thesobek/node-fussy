@@ -7,10 +7,17 @@
 
 ## Summary
 
-Fussy is an inference engine for Node. You can use it to guess missing values in a JSON object.
+Fussy can repair / complete a object by looking at a database or similar objects.
 
-It tried to find the most probable values for missing attributes by scanning a database of previously seen objects, computing a weighted average based on similarity.
+It is based on lazy.js for the API, and it is still experimental.
 
+## Quickstart
+
+```Javascript
+require('fussy')
+
+// TODO
+```
 
 ## Examples
 
