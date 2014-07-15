@@ -7,17 +7,74 @@
 
 ## Summary
 
-Fussy can repair / complete a object by looking at a database or similar objects.
+Fussy is a machine learning library for Node aiming at repairing JSON objects.
 
-It is based on lazy.js for the API, and it is still experimental.
+You can use it to repair a database containing missing data, categorize or
+predict the content of documents (see examples).
 
-## Quickstart
+Fussy will start reading the input stream when you hit one of the trigger functions:
+
+- Fussy::solve(cb)
+- Fussy::repair(cb)
+
+You will see later than you can also create "query" object. They also do nothing
+until you call:
+
+- Query::all(cb)
+- Query::best(cb)
+
+Trigger functions work asynchronously, unless you omit the callback.
+
+Currently, Fussy does not work on nested json objects, but I plan to add it.
+
+json objects
+
+## Basic usage
 
 ```Javascript
-require('fussy')
+console.log(
 
-// TODO
+  require('fussy')
+    .input('file://demo/*.json')
+    .solve({
+      foo: undefined,
+      bar: 42.0
+    })
+
+)
 ```
+
+## Examples
+
+### Using a directory of .JSON files
+
+```Javascript
+var db = Fussy.input('file://demo/*.json');
+```
+
+### Using a CSV file
+
+```Javascript
+Fussy.input('file://test.csv')
+  .skip(1)                   // skip first line (csv header)
+  .limit(1000)               // limit size
+  .schema('schema.json');    // path to json file used to map columns to object
+
+```
+
+
+### Patching a live JavaScript object (without copy)
+
+```Javascrupt
+db.repair(my.application.foo.bar);
+```
+
+### Fine tuning of a query
+
+```Javascrupt
+db.repair(my.application.foo.bar);
+```
+
 
 ## Examples
 
@@ -121,7 +178,7 @@ to write a small importer for CSV files. So here we go!
 The `import` function takes an input CSV file, and a list of columns as parameter:
 
 ```javascript
-var data = fussy.import('thermal.csv', [ 'day', 'temperature' ]);
+
 ```
 
 This second parameter can be used to define types:

@@ -1,10 +1,7 @@
 # standard node library
-
 path   = require 'path'
 util   = require 'util'
 Url    = require 'url'
-
-
 
 # thrid party modules
 Lazy    = require 'lazy.js'
@@ -21,16 +18,21 @@ csv     = require 'ya-csv'
 utils   = require './utils'
 extract = require './extract'
 pretty = utils.pretty
-debug = (x) -> console.log x
 
+debugEnabled = no
+debug = (x) ->
+  return unless debugEnabled
+  console.log x
+detach = (f) -> setTimeout f, 0
 
 class Query
   constructor: (db, q) ->
     @_error = undefined
+    @_mode = 'all'
 
     if q.select?
 
-      if utils.isString @qlect
+      if utils.isString q.select
         tmp = {}
         tmp[q.select] = []
         q.select = tmp
@@ -43,16 +45,25 @@ class Query
 
       # else we assume this is a correctly formatted object
 
-
     unless utils.isArray q.where
       q.where = [ q.where ]
 
     @_db = db
     @_query = q
 
+  debug: (enabled) ->
+    return debugEnabled unless enabled?
+    debug "Query".yellow + "::debug(value) " + " // setting debug to ".grey + "#{pretty enabled}"
+    debugEnabled = enabled
+    @
 
   _reduceFn: (reduction, features) ->
-    debug "Query::reduceFn(reduction, features)" +" // deep comparison".grey
+    debug "Query".green + "::reduceFn(reduction, features)" +" // deep comparison".grey
+    unless features?
+      debug "Query".green + "::reduceFn: end condition"
+      return reduction
+
+    query = reduction.query
     #debug "reduction: " + pretty reduction
     #debug "features: "+pretty features
 
@@ -143,30 +154,33 @@ class Query
       #debug "match for #{key}: #{query.select[key]}"
 
       match = no
-      if utils.isArray query.select[key]
-        #debug "array"
-        if query.select[key].length
-          if value in query.select[key]
-            #debug "SELECT match in array!"
+      if query.select?
+        if utils.isArray query.select[key]
+          #debug "array"
+          if query.select[key].length
+            if value in query.select[key]
+              #debug "SELECT match in array!"
+              match = yes
+          else
+            #debug "empty"
             match = yes
         else
-          #debug "empty"
-          match = yes
+          #debug "not array"
+          if value is query.select[key]
+            #debug "SELECT match single value!"
+            match = yes
       else
-        #debug "not array"
-        if value is query.select[key]
-          #debug "SELECT match single value!"
-          match = yes
+        match = yes
 
       if match
         reduction.result[key][value] += weight
 
-    debug "generated reduction result"
+    debug "Query".green + "::_reduceFn: reducing"
     #debug pretty reduction
-    reduction
+    return reduction
 
   _sortFn: (input, cb) ->
-    debug "Query::_sortFn(input, cb?)"+" // sort options by probability".grey
+    debug "Query".green + "::_sortFn(input, cb?)"+" // sort options by probability".grey
     output = input.sort (a,b) -> b[2] - a[2]
     if cb?
       cb output
@@ -174,94 +188,182 @@ class Query
     else
       return output
 
-  # convert a key:{ opt_a:3, opt_b: 4}
-  _castFn: (args, cb) ->
+  _toBestFn: (args) ->
+    debug "Query".green + "::_toBestFn(args)"
+    {result, types} = args
 
-    debug "Query::_castFn(args, cb?)"+"  // cast output map to typed array"
+    output = {}
+    for key, options of result
+      isNumerical = types[key] is 'Number'
 
-    __castFn = (args) ->
-      debug "Query::_castFn:__castFn(args)"
-      [key, options] = args.result
-      if args.types[key] is 'Number'
+      if utils.isNumerical
+
+        sum = 0
         for option, weight of options
-          [key, (Number) option, weight]
-      else if args.types[key] is 'Boolean'
+          sum += weight
+
+        output[key] = 0
         for option, weight of options
-          [key, (Boolean) option, weight]
+          option = (Number) option
+          output[key] += option * (weight / sum)
+
       else
+        output[key] = []
         for option, weight of options
-          [key, option, weight]
+          if types[key] is 'Boolean'
+            option = (Boolean) option
+          output[key].push [option, weight]
+        output[key].sort (a,b) -> b[1] - a[1]
+        best = output[key][0] # get the best
+        output[key] = best[0] # get the value
+
     if cb?
-      cb __castFn args
+      cb output
       return undefined
     else
-      return __castFn args
+      return output
 
-  get: (cb) ->
-    debug "Query::get(cb?)"
-    if cb? then @onComplete(cb) else @toArray()
+
+  # convert a key:{ opt_a:3, opt_b: 4}
+  _toAllFn: (args, cb) ->
+
+    debug "Query".green + "::_toAllFn(args, cb?)"+"  // cast output map to typed array"
+
+    __toAllFn = (args) ->
+      debug "Query".green + "::_toAllFn:__toAllFn(#{pretty args})"
+      res = {}
+      for key, options of args.result
+        res[key] = if args.types[key] is 'Number'
+            debug "Query".green + "::_toAllFn:__toAllFn: Number -> #{key}"
+            for option, weight of options
+              [key, (Number) option, weight]
+          else if args.types[key] is 'Boolean'
+            debug "Query".green + "::_toAllFn:__toAllFn: Boolean -> #{key}"
+            for option, weight of options
+              [key, (Boolean) option, weight]
+          else
+            debug "Query".green + "::_toAllFn:__toAllFn: String -> #{key}"
+            for option, weight of options
+              [key, option, weight]
+    if cb?
+      result = __toAllFn args
+      cb result
+      return undefined
+    else
+      result = __toAllFn args
+      return result
+
+
+  all: (cb) ->
+    debug "Query".green + "::all(cb?)"
+    @_mode = 'all'
+    if cb? then @_async(cb) else @_sync()
+
+  best: (cb) ->
+    debug "Query".green + "::mix(cb?)"
+    @_mode = 'best'
+    if cb? then @_async(cb) else @_sync()
+
+  replace: (cb) ->
+    debug "Query".green + "::replace(cb?)"
+    @_mode = 'replace'
+    if cb? then @_async(cb) else @_sync()
+
 
   # toArray = get sync
-  toArray: ->
-    debug "Query::toArray()"
+  _sync: ->
+    debug "Query".green + "::_sync()"
 
     ctx =
       reduction:
+        query: @_query
         result: {}
         types: {}
 
-    debug "Query::toArray: @_db.eachFeatureSync:"
-    @_db.eachFeaturesSync (features, index, isLastItem) =>
-      debug "Query::toArray: @_db.eachFeatureSync(#{prerry features},#{pretty index},#{pretty isLastItem})"
+    debug "Query".green + "::_sync: @_db.eachFeatureSync:"
+    @_db.eachFeaturesSync (features, isLastItem) =>
+      debug "Query".green + "::_sync: @_db.eachFeatureSync(#{pretty features}, #{pretty isLastItem})"
       ctx.reduction = @_reduceFn ctx.reduction, features
 
-    debug "Query::toArray: @_castFn(sorted)"
-    casted = @_castFn ctx.reduction
+    results = switch @_mode
+      when 'all'
+        debug "Query".green + "::_sync: all: @_toAllFn(#{pretty ctx.reduction})"
+        results = @_toAllFn ctx.reduction
+        @_sortFn results
 
-    debug "Query::toArray: @_sortFn(casted)"
-    sorted = @_sortFn casted
+      when 'best'
+        debug "Query".green + "::_sync: best: @_toBestFn(#{pretty ctx.reduction})"
+        @_toBestFn ctx.reduction
 
-    debug "Query::toArray: return"
-    sorted
+      when 'replace'
+        debug "Query".green + "::_sync: fix: @_toBestFn(#{pretty ctx.reduction})"
+        result = @_toBestFn ctx.reduction
+
+        obj = ctx.reduction.query.replace
+        for k,v of result
+          if !obj[k]?
+            obj[k] = v
+        obj
+
+
+    debug "Query".green + "::_sync: return #{pretty results}"
+    results
 
   onError: (cb) ->
-    debug "Query::onError(cb)"
+    debug "Query".green + "::onError(cb)"
     @_onError = cb
 
   # onComplete = get async
-  onComplete: (cb) ->
+  _async: (cb) ->
 
-    debug "Query::onComplete(cb)"
+    debug "Query".green + "::_async(cb)"
 
     ctx =
       reduction:
+        query: @_query
         result: {}
         types: {}
 
-    debug "Query::onComplete: @_db.eachFeatureAsync:"
-    @_db.eachFeaturesAsync (features, index, isLastItem) =>
-      debug "Query::onComplete:   @_db.eachFeatureAsync(#{pretty features},#{pretty index},#{pretty isLastItem})"
+    debug "Query".green + "::_async: @_db.eachFeatureAsync:"
+    @_db.eachFeaturesAsync (features, isLastItem) =>
+      debug "Query".green + "::_async: @_db.eachFeatureAsync(#{pretty features}, #{pretty isLastItem})"
 
-      debug "Query::onComplete:     @_reduceFn(ctx.reduction, features)"
+      debug "Query".green + "::_async: @_reduceFn(ctx.reduction, features)"
       ctx.reduction = @_reduceFn ctx.reduction, features
       return unless isLastItem
-      debug "Query::onComplete:     isLastItem == true"
-      # sync
-      debug "Query::onComplete:   @_castFn(ctx.reduction, cb)"
-      @_castFn ctx.reduction, (casted) ->
+      debug "Query".green + "::_async: isLastItem == true"
 
-        # sync too
-        debug "Query::onComplete:   @_sortFn(casted, cb)"
-        @_sortFn casted, (sorted) ->
+      results = switch @_mode
+        when 'all'
+          # sync
+          debug "Query".green + "::_async: all: @_toAllFn(ctx.reduction, cb)"
+          @_toAllFn ctx.reduction, (results) =>
 
-          debug "Query::onComplete: cb(sorted)"
-          cb sorted
+            # sync too
+            debug "Query".green + "::_async: all: @_sortFn(results, cb)"
+            @_sortFn results, (results) =>
+
+              debug "Query".green + "::_async: all: cb(results)"
+              cb results
+
+        when 'best'
+          debug "Query".green + "::_async: best: @_toBestFn(#{pretty ctx.reduction})"
+          @_toBestFn ctx.reduction, (best) =>
+
+            debug "Query".green + "::_async: best: cb(results)"
+            cb results
+
+        when 'fix'
+          debug "Query".green + "::_async: fix: @_toBestFn(#{pretty ctx.reduction})"
+          @_toBestFn ctx.reduction, (best) =>
+            obj = ctx.reduction.query.replace
+            for k,v of result
+              if !obj[k]?
+                obj[k] = v
+            obj
+            cb obj
 
     return undefined
-
-
-
-
 
 class File
   constructor: (@_fussy, @_url) ->
@@ -278,19 +380,19 @@ class File
   # using the low level file read (ie. only load the file chunk by chunk,
   # synchronously)
   eachSync: (cb) ->
-    debug "File::eachSync(cb)"
+    debug "File".blue + "::eachSync(cb)"
     fs = require 'fs'
     str = fs.readFileSync @_path, 'utf-8'
     lines = str.split('\n')
     i = 0
     for line in lines
-      cb line, i, no
+      cb line, no
       i += 1
-    cb undefined, i, yes
+    cb undefined, yes
 
 
   eachAsync: (cb) ->
-    debug "File::eachAsync(cb)"
+    debug "File".blue + "::eachAsync(cb)"
     fs = require 'fs'
     readline = require 'readline'
     stream = require 'stream'
@@ -301,11 +403,11 @@ class File
 
     i = 0
     rl.on 'line', (line) ->
-      cb line, i, no
+      cb line, no
       i += 1
 
     rl.on 'close', ->
-      cb undefined, i, yes
+      cb undefined, yes
 
     return undefined
 
@@ -335,18 +437,18 @@ class Mongo
 
     db = new Server @_host
 
-    debug "Mongo::eachSync: gettin cursor on database and collection"
+    debug "Mongo".blue + "::eachSync: gettin cursor on database and collection"
     cursor = db
       .db(@_database)
       .getCollection(@_collection)
       .find()
 
     if skip?
-      debug "Mongo::eachSync: skipping #{skip} results of collection"
+      debug "Mongo".blue + "::eachSync: skipping #{skip} results of collection"
       cursor = cursor.skip skip
 
     if limit?
-      debug "Mongo::eachSync: limiting #{limit} results of collection"
+      debug "Mongo".blue + "::eachSync: limiting #{limit} results of collection"
       cursor = cursor.limit limit
 
     results = cursor.toArray()
@@ -354,14 +456,14 @@ class Mongo
     i = 0
     size = results.length
     for item in results
-      cb item, i, no
-    cb undefined, size, yes
+      cb item, no
+    cb undefined, yes
     db.close()
     return undefined
 
   # iterate asynchronously over a mongo collection
   eachAsync: (cb) ->
-    debug "Mongo::eachAsync(cb)"
+    debug "Mongo".blue + "::eachAsync(cb)"
 
     MongoClient = require('mongodb').MongoClient
     collection = @_collection
@@ -369,21 +471,21 @@ class Mongo
     skip = @_fussy.skip()
     delay = 0 # async delay
 
-    debug "Mongo::eachAsync: connecting to mongo (#{@_host}:#{@_port})"
+    debug "Mongo".blue + "::eachAsync: connecting to mongo (#{@_host}:#{@_port})"
     MongoClient.connect "mongodb://#{@_host}:#{@_port}/#{_database}", (err, db) ->
       throw err if err
 
-      debug "Mongo::eachAsync: gettin cursor on database and collection"
+      debug "Mongo".blue + "::eachAsync: gettin cursor on database and collection"
       cursor = db
         .collection(collection)
         .find()
 
       if skip?
-        debug "Mongo::eachSync: skipping #{skip} results of collection"
+        debug "Mongo".blue + "::eachSync: skipping #{skip} results of collection"
         cursor = cursor.skip skip
 
       if limit?
-        debug "Mongo::eachSync: limiting #{limit} results of collection"
+        debug "Mongo".blue + "::eachSync: limiting #{limit} results of collection"
         cursor = cursor.limit limit
 
       cursor = cursor
@@ -392,24 +494,23 @@ class Mongo
       # this function is closure-safe (we could put it outside in a library)
       _readCursor = (cursor, i, delay, db, next) ->
         cursor.nextObject (err, item) ->
-          debug "Mongo::eachAsync:_readCursor: cursor.nextObject(function(err, item){})"
+          debug "Mongo".blue + "::eachAsync:_readCursor: cursor.nextObject(function(err, item){})"
           throw err if err
           if item
             debug "                          - returned an item"
-            cb item, i, yes
+            cb item, yes
             fn = -> next(cursor, i+1, delay)
             setTimeout fn, delay
           else
             debug "                          - returned nothing: end reached"
-            cb undefined, i, yes
+            cb undefined, yes
             db.close()
 
-      debug "Mongo::eachAsync: calling _readCursor(cursor, 0, delay, db, next)"
+      debug "Mongo".blue + "::eachAsync: calling _readCursor(cursor, 0, delay, db, next)"
       _readCursor(cursor, 0, delay, db, _readCursor)
     return undefined
 
-
-class Database
+class Fussy
 
   constructor: (input) ->
 
@@ -420,59 +521,60 @@ class Database
 
     switch parsed.protocol
       when 'rest:','http:','http+rest:','http+json', 'https:','https+rest:','https+json'
-        debug "Database::constructor: protocol is http rest"
+        debug "Fussy".yellow + "::constructor: protocol is http rest"
         throw "http rest protocol is not supported yet"
 
       when 'file:','file+csv:','file+json:','file+txt:'
-        debug "Database::constructor: protocol is file"
+        debug "Fussy".yellow + "::constructor: protocol is file"
         @_engine = new File @, input
 
       when 'mongo:', 'mongodb:'
-        debug "Database::constructor: protocol is MongoDB"
+        debug "Fussy".yellow + "::constructor: protocol is MongoDB"
         @_engine = new Mongo @, input
 
       else #when undefined
-        debug "Database::constructor: protocol is default (file)"
+        debug "Fussy".yellow + "::constructor: protocol is default (file)"
         @_engine = new File @, input
 
   _parse: (input) ->
 
-    debug "Database::_parse(input) " +"  // convert raw chunk into full featured object".grey
+    #debug "Fussy".yellow + "::_parse(input) " +"  // convert raw chunk into full featured object".grey
     #debug input
     output = undefined
     #debug "map: extracting features from "+JSON.stringify input
 
     # do we have a schema defined?
     if @_schema?
+      debug "Fussy".yellow + "::_parse: using schema"
       if utils.isString input
-        debug "trying to parse csv line using schema"
-        debug "line: "+input
+        #debug "Fussy".yellow + "::_parse: trying to parse csv line using schema"
+        #debug "Fussy".yellow + "::_parse: line: "+input
         try
           output = utils.parse @_schema, input
         catch exc
           #debug exc
-          debug "Database::_parse: couldn't parse input, trying to parse json from string"
+          debug "Fussy".yellow + "::_parse: couldn't parse input, trying to parse json from string"
           try
             output = JSON.parse input
           catch exc
             #debug exc
-            debug "Database::_parse: couldn't parse json input. I could use the object as is, but since you defined a schema I prefer to skip it"
+            debug "Fussy".yellow + "::_parse: couldn't parse json input. I could use the object as is, but since you defined a schema I prefer to skip it"
             output = undefined
       else
         output = input
 
     else if utils.isString input
-      debug "Database::_parse: no schema, trying to parse json from string"
+      debug "Fussy".yellow + "::_parse: no schema, trying to parse json from string"
       output = JSON.parse input
     else
-      debug "Database::_parse: no schema, using js object as-is"
+      debug "Fussy".yellow + "::_parse: no schema, using js object as-is"
       output = input
-    debug "Database::_parse: #{pretty input} =====> #{pretty output}"
+    debug "Fussy".yellow + "::_parse: #{pretty input} =====> #{pretty output}"
     #debug "extracting output"
     output
 
   _extract: (event, facts=[], prefix="") ->
-    debug "Database::_extract(event)"
+    debug "Fussy".yellow + "::_extract(event)"
     #console.log "extracting features from: #{JSON.stringify event}"
     ###
     This was supposed to be a built-in support for a "date" attribute
@@ -521,49 +623,119 @@ class Database
 
   schema: (schema) ->
     throw "cannot set an undefined schema" if !schema?
-    @_schema = schema
+    @_schema = utils.loadSchema schema
     @
 
   limit: (limit) ->
     return @_limit unless limit?
     throw "limit must be >= 0" if limit < 0
-    debug "Database::limit(value) " + " // setting limit to ".grey + "#{pretty limit}"
+    debug "Fussy".yellow + "::limit(value) " + " // setting limit to ".grey + "#{pretty limit}"
     @_limit = limit
     @
 
   skip: (skip) ->
     return @_skip unless skip?
     throw "skip must be >= 0" if skip < 0
-    debug "Database::skip(value) " + " // setting skip to ".grey + "#{pretty skip}"
+    debug "Fussy".yellow + "::skip(value) " + " // setting skip to ".grey + "#{pretty skip}"
     @_skip = skip
     @
 
-  eachFeaturesSync: (cb) ->
-    debug "Database::eachFeaturesSync(cb)"
-    @_engine.eachSync (item, index, eof) =>
-      features = @_extract @_parse item
-      cb features, index, eof
+  debug: (enabled) ->
+    return debugEnabled unless enabled?
+    debug "Fussy".yellow + "::debug(value) " + " // setting debug to ".grey + "#{pretty enabled}"
+    debugEnabled = enabled
+    @
 
-  eachFeaturesAsync: (cb) ->
-    debug "Database::eachFeaturesAsync(cb)"
-    @_engine.eachAsync (item, index, eof) =>
-      features = @_extract @_parse item
-      cb features, index, eof
+  ###
+  Call a function on each item, synchronously
+  (the function will only returns once all items have been read)
+  This functions skips invalid items
+  ###
+  eachFeaturesSync: (cb) ->
+    debug "Fussy".yellow + "::eachFeaturesSync(cb)"
+    @_engine.eachSync (item, eof) =>
+      debug "Fussy".green + "::eachFeaturesSync: @_engine.eachSync (item=#{pretty item}, eof=#{pretty eof})"
+
+      # if end reached, return immediately
+      if eof
+        cb undefined, eof
+        return
+
+      extracted = @_parse item
+      return unless extracted
+      features = @_extract extracted
+      return unless features
+      cb features, eof
+
+  ###
+  Call a function on each item, asynchronously
+  ###
+  eachFeaturesAsync: (cb) => detach =>
+    debug "Fussy".yellow + "::eachFeaturesAsync(cb)"
+    @_engine.eachAsync (item, eof) =>
+      debug "Fussy".green + "::eachFeaturesAsync: @_engine.eachAsync (item=#{pretty item}, eof=#{pretty eof})"
+
+
+      # if end reached, return immediately
+      if eof
+        cb undefined, eof
+        return
+
+      extracted = @_parse item
+      return unless extracted
+      features = @_extract extracted
+      return unless features
+      cb features, eof
 
   onComplete: (onCompleteCb) ->
-    debug "Database::_onCompleteCb = onCompleteCb"
+    debug "Fussy".yellow + "::_onCompleteCb = onCompleteCb"
     @_onCompleteCb = onCompleteCb
     @
 
   query: (query) ->
     new Query @, query
 
+  ###
+  Repair an object in-place
+  Only fields that are undefined will be filled, others will be left untouched
+  ###
+  repair: (obj, cb) ->
+
+    query = new Query @,
+      replace: obj
+      select: Object.keys(obj)
+      where: do ->
+        newObj = {}
+        for key in Object.keys(obj)
+          if obj[key]?
+            newObj[key] = obj[key]
+        newObj
+
+    query.replace cb
+
+
+  solve: (obj, cb) ->
+
+    query = new Query @,
+      select: Object.keys(obj)
+      where: do ->
+        newObj = {}
+        for key in Object.keys(obj)
+          if obj[key]?
+            newObj[key] = obj[key]
+        newObj
+
+    query.best()
 
 module.exports =
+
+  debug: (enabled) ->
+    debugEnabled = enabled
+    @
 
   pretty: utils.pretty
   pperf: utils.pperf
   pstats: utils.pstats
 
-  database: (input) ->
-    new Database input
+  input: (input) ->
+    new Fussy input
