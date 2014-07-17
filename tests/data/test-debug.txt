@@ -1,0 +1,29 @@
+Fussy::solve(obj, cb)
+Query::mix(cb?)
+Query::_sync()
+Query::_sync: @_fussy.eachFeatureSync:
+Fussy::eachFeaturesSync(cb)
+List::eachSync
+Fussy::eachFeaturesSync: @_engine.eachSync (item={ foo: 'bar' }, eof=false)
+Fussy::_parse: object is not a string, so we won't parse it
+Fussy::_parse: { foo: 'bar' } =====> { foo: 'bar' }
+Fussy::_extract(event)
+Fussy::_extract: String
+Query::_sync: @_fussy.eachFeatureSync([ [ 'String', 'foo', 'bar' ] ], false)
+Query::reduceFn(reduction, features) // deep comparison
+Query::_reduceFn: reducing
+Fussy::eachFeaturesSync: @_engine.eachSync (item={ bar: 'foo' }, eof=false)
+Fussy::_parse: object is not a string, so we won't parse it
+Fussy::_parse: { bar: 'foo' } =====> { bar: 'foo' }
+Fussy::_extract(event)
+Fussy::_extract: String
+Query::_sync: @_fussy.eachFeatureSync([ [ 'String', 'bar', 'foo' ] ], false)
+Query::reduceFn(reduction, features) // deep comparison
+Query::_reduceFn: reducing
+Fussy::eachFeaturesSync: @_engine.eachSync (item=undefined, eof=true)
+Query::_sync: @_fussy.eachFeatureSync(undefined, true)
+Query::reduceFn(reduction, features) // deep comparison
+Query::reduceFn: end condition
+Query::_sync: best: @_toBestFn({ query: { select: {}, where: [ {} ] }, result: {}, types: {} })
+Query::_toBestFn(args)
+Query::_sync: return {}

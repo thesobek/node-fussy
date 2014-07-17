@@ -7,277 +7,123 @@
 
 ## Summary
 
-Fussy is a machine learning library for Node aiming at repairing JSON objects.
+Fussy is a library for predicting missing values in a JSON object, using a
+database of similar documents.
 
-You can use it to repair a database containing missing data, categorize or
-predict the content of documents (see examples).
+You can use it for various things, classification, marketing, prediction etc..  
+For instance I am using it to solve some [basic machine learning problems](https://github.com/jbilcke/node-fussy-examples),
+and it is pretty fun!
 
-Fussy will start reading the input stream when you hit one of the trigger functions:
+My goal is to make it scale on larger datasets (more than 20.000 items) but
+there still a long road.
 
-- Fussy::solve(cb)
-- Fussy::repair(cb)
+## Notes / Todo
 
-You will see later than you can also create "query" object. They also do nothing
-until you call:
+- Nested objects are UNSUPPORTED. Tell me if you really need this feature.
+- Larges datasets are slow to process. That's normal:
+  The algorithm is `O(N*M)` (N: nb of objects to test, M: nb of objects in the database)
+- See if we could speed things up by using other machine learning techniques,
+  Or parallelize the job
 
-- Query::all(cb)
-- Query::best(cb)
-
-Trigger functions work asynchronously, unless you omit the callback.
-
-Currently, Fussy does not work on nested json objects, but I plan to add it.
-
-json objects
-
-## Basic usage
-
-```Javascript
-console.log(
-
-  require('fussy')
-    .input('file://demo/*.json')
-    .solve({
-      foo: undefined,
-      bar: 42.0
-    })
-
-)
-```
-
-## Examples
-
-### Using a directory of .JSON files
-
-```Javascript
-var db = Fussy.input('file://demo/*.json');
-```
-
-### Using a CSV file
-
-```Javascript
-Fussy.input('file://test.csv')
-  .skip(1)                   // skip first line (csv header)
-  .limit(1000)               // limit size
-  .schema('schema.json');    // path to json file used to map columns to object
-
-```
-
-
-### Patching a live JavaScript object (without copy)
-
-```Javascrupt
-db.repair(my.application.foo.bar);
-```
-
-### Fine tuning of a query
-
-```Javascrupt
-db.repair(my.application.foo.bar);
-```
-
-
-## Examples
-
-Demo examples (included in the project):
-
-- [Logic: playing with boolean and fuzzy truth tables](https://github.com/jbilcke/node-fussy/tree/master/examples/logic)
-- [Mushrooms: recommendation of mushrooms](https://github.com/jbilcke/node-fussy/tree/master/examples/mushrooms)
-
-More examples:
-
-- [Sonar: categorization of sonar data into mines or rocks](https://github.com/jbilcke/node-fussy-examples/tree/master/sonar)
-- [Wilt: detecting diseased trees in Quickbird imagery](https://github.com/jbilcke/node-fussy-examples/tree/master/wilt)
-- [Emotiv: detecting eye state from Emotiv EEG Headset](https://github.com/jbilcke/node-fussy-examples/tree/master/emotiv)
-- [Letters: letter recognition (OCR)](https://github.com/jbilcke/node-fussy-examples/tree/master/letters)
-
-
-## License
-
-BSD (see LICENCE.txt file).
-
-## Current issues
-
-Fussy is an experimental project, and has a number of pitfalls:
-
- - no tests yet (but soon)
- - code is alpha quality, not reviewed
- - all data must be loaded into memory (cannot use a remote db yet)
- - extremely slow (see mushroom demo..)
- - the "0" value is not supported well
- - not tested for strings (distance function is a bit broken, and will be rewritten)
- - and probably many other bugs..
-
-
-## How it works
-
-### Algorithm
-
-The algorithm works as the following:
-
-For a given JSON object with some missing fields, it tries to determine the most probable value of these fields, by looking at all the past values, and computing the average.
-
-However, it does a weighted average: a different "trust" is given to each past object, depending on how close and relevant they are from the object to repair.
-
-For this, what Fussy do is iteraring over all the stored objects (in a map-reduce fashion), and computing a distance score, based on the similarity between values: strings, numbers..
-
-This distance will be used to weight the value of the missing field when computing the average.
-
-
-
-## Quick-start
+## Quickstart / Tutorial
 
 ### Installation
 
-#### As a dependency
-
-Go to your Node (and NPM-managed) project, and run:
+First you need to install it in your project:
 
     $ npm install fussy --save
 
-#### From sources
+### Basic usage
 
-To download the sources, build the coffee-script and link into your system:
-
-    $ git clone git@github.com:jbilcke/node-fussy.git
-    $ cd node-fussy
-    $ npm run build
-    $ npm link
-
-
-### Initialization
-
-First you have to get an instance of the class Fussy
+Import the library, then create a compute stream on some input, and solve an incomplete JSON object:
 
 ```javascript
 var Fussy = require('fussy');
-var fussy = new Fussy();
+
+Fussy('my/docs/*.json')
+  .solve({
+    foo: undefined, // this will be replaced by the best value
+    bar: 'foobar'    // this will be used to find the best value
+  })
 ```
 
-### Inserting JSON data
+### Creating and hacking a stream
 
-Then you can insert documents. You have a few ways of doing this.
+`Fussy(..)` creates a computation stream, and provides a few functions which returns immediately:
 
-You can use use the `insert` method, which takes a JSON object, or an array of
-objects:
+  - `skip(Number)`: skips the N first objects in the stream
+
+  - `limit(Number)`: limits to N objects
+
+  - `debug(true|false)`: shows or hide verbose debug log (in the standard output)
+
+These functions configure and returns the stream, so you can chain them.
+
+### Solving an object
+
+No work will be done or data be read until you call one of the trigger functions. Trigger functions are the ones doing all the work to predict the undefined fields in your object:
+
+  - `solve(Object, Function?)`: solves an object (returns a copy, original is untouched)
+
+  - `repair(Object, Function?)`: solves an object (original will be updated in-place)
+
+These functions take an optional callback function argument, for aysnchronous flow.
+
+If you need quick debugging, or are writing a simple command-line script, you can use the synchronous mode for convenience.
+
+## API Documentation
+
+Now we can dive into the advanced features:
+
+### Using a CSV source file
+
+#### Basic CSV file
 
 ```javascript
-fussy
-  .insert({ 'food': 'rice',  'taste': 'good'});
-  .insert([
-    { 'food': 'salad', 'taste': 'good'},
-    { 'food': 'grass', 'taste': 'bad' }
-  ]);
-
+Fussy('test.csv')
 ```
 
-### Importing a dataset
+#### Trimmed CSV file
 
-After spending some time using Fussy on various datasets, I found it handy
-to write a small importer for CSV files. So here we go!
-
-The `import` function takes an input CSV file, and a list of columns as parameter:
+ Load a CSV, skipping the first line, and keeping the 100 next lines:
 
 ```javascript
-
+Fussy('test.csv')
+  .skip(1)
+  .limit(100)
 ```
+#### Alternative syntax
 
-This second parameter can be used to define types:
+ You can also use an URL with the `file:` protocol:
 
 ```javascript
-fussy.import('thermal.csv', [
-    ['day','String'],
-    ['temperature','Number']
-]);
+Fussy('file://test.csv')
 ```
 
-You can also define a dictionary of values, when using Strings:
+#### Typecasting CSV columns
+
+By default, Fussy will scratch its head and try to figure out what kind of data it deals with.
+
+
+### Using a remote file
+
+*Note: for the moment this is available for asynchronous trigger calls only.*
 
 ```javascript
-fussy.import('thermal.csv', [
-    ['day', {
-      'mon': 'Monday',
-      'tue': 'Tuesday',
-      'wed': 'Wednesday',
-      'thu': 'Thursday',
-      'fri': 'Friday',
-      'sat': 'Saturday',
-      'sun': 'Sunday'
-      }],
-    ['temperature','Number']
-]);
+Fussy('http://foo.bar/data/set.csv')
 ```
+### Using a MongoDB collection
 
-### Using the dataset function
-
-Sometimes you need to do some operations on a dataset before using it.
-
-For instance, maybe you only want to keep a subset of the dataset, or do
-random sampling, so you need access to the array before importing it.
-
-Fussy provides a function to create a dataset (array of JSONs), available
-in the `fussy.toolbox` object.
-
-The `fussy.toolbox.dataset` takes an input CSV file and a list of columns as
-parameter.
-
-It works like the import function:
+*Note: NOT TESTED, MIGHT BE BROKEN, WARNING WARNING*
 
 ```javascript
-var data = fussy.toolbox.dataset('thermal.csv', [ 'day', 'temperature' ]);
+Fussy('mongo://myserver:27017/mydatabase/mycollection')
 ```
 
-You can then manipulate this array, before importing it. For instance:
+### The Query object
 
-```javascript
-var data = fussy.toolbox.shuffle(
-  fussy.toolbox.dataset('data.csv', 'schema.json')
-);
-```
+Queries are like view on your data: you create queries by calling the `query({ .. })`
+function on a Fussy stream.
 
-Will load the dataset and shuffle it.
-
-
-### Predicting data
-
-
-```javascript
-var query = fussy.query({
-  select: ['column'],
-  where: {
-    foo: '',
-    bar: ''
-  }
-});
-```
-
-### Using the results
-
-When you call the query object, what you get is a result set, or "view" on
-the data. This view has the following methods:
-
-#### best()
-
-The `best` function returns the best value for a given field. It actually
-just takes the first element of the `all` function.
-
-Depending on the distribution and the category of problem you are trying to
-solve, this might not be the best choice for you.
-
-#### mix()
-
-The `mix` compute the weighted average value for a numeric field.
-
-For instance, say there are 3 possible values for a "temperature" field: 10, 20, 40..
-
-While the `all` function will returns an array of value->weight, the `mix`
-function will directly returns you the weighted average, eg. 23.33.
-
-#### all()
-
-The `all` function returns the distribution of values: an array sorted by weight,
-of all possible choices for the requested fields.
-
-This is actually an array of `(value, weight)` tuples.
-
-Use this function if you want access to raw data, and need to make
-multiple, weighted decisions. (eg. for investment, risk management use cases).
+Creating a query returns a new one immediately, and most Query functions are
+asyncronous, too, until you call one of the trigger functions:

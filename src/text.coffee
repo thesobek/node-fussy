@@ -4,7 +4,7 @@
 Compute the distance between two strings
 
 TODO
-  This function needs a bit more research.
+  This function is totally incomplete, and doesn't work as expected yet.
 
   Ideally, I would like a function that give me:
   - 1 for exact match between two strings
@@ -27,7 +27,7 @@ See:
 For for now, I am experimenting. Maybe I will use a couple of functions.
 ###
 exports.distance = distance = (str1, str2, n=3) ->
-  console.log "distance(#{str1}, #{str2})"
+  #console.log "distance(#{str1}, #{str2})"
 
   _ngramize = (str, n) ->
     #console.log "str before: \"#{str}\""
@@ -69,9 +69,9 @@ exports.distance = distance = (str1, str2, n=3) ->
 
         if depth > 0
           weight += 10 ** depth
-        console.log "depth: "+depth
-  console.log "weight: "+weight+", max: "+max+", nb_feats: "+nb_feats
-  console.log "result: " + (weight / max)
+        #console.log "depth: "+depth
+  #console.log "weight: "+weight+", max: "+max+", nb_feats: "+nb_feats
+  #console.log "result: " + (weight / max)
   final_weight = if max is 0 then 1 else weight / max
   [final_weight, nb_feats]
 

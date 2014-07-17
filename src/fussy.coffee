@@ -1,580 +1,169 @@
+"use strict"
+
 # standard node library
-path   = require 'path'
-util   = require 'util'
 Url    = require 'url'
 
-# thrid party modules
-Lazy    = require 'lazy.js'
-unzip   = require 'unzip'
-mime    = require 'mime'
-colors  = require 'colors'
-#csv     = require 'csv-stream'
-csv     = require 'ya-csv'
 
-#streamBuffers = require 'stream-buffers'
-#duplexify = require 'duplexify'
+# third party modules
+colors    = require 'colors'
+csvString = require 'csv-string' # csv row parser
 
 # our modules
 utils   = require './utils'
-extract = require './extract'
+
+# protocols
+List    = require './protocols/list'
+File    = require './protocols/file'
+Http    = require './protocols/http'
+Mongo   = require './protocols/mongo'
+
+Query  = require './query'
+
 pretty = utils.pretty
 
-debugEnabled = no
-debug = (x) ->
-  return unless debugEnabled
-  console.log x
-detach = (f) -> setTimeout f, 0
-
-class Query
-  constructor: (db, q) ->
-    @_error = undefined
-    @_mode = 'all'
-
-    if q.select?
-
-      if utils.isString q.select
-        tmp = {}
-        tmp[q.select] = []
-        q.select = tmp
-
-      else if utils.isArray q.select
-        tmp = {}
-        for select in q.select
-          tmp[select] = []
-        q.select = tmp
-
-      # else we assume this is a correctly formatted object
-
-    unless utils.isArray q.where
-      q.where = [ q.where ]
-
-    @_db = db
-    @_query = q
-
-  debug: (enabled) ->
-    return debugEnabled unless enabled?
-    debug "Query".yellow + "::debug(value) " + " // setting debug to ".grey + "#{pretty enabled}"
-    debugEnabled = enabled
-    @
-
-  _reduceFn: (reduction, features) ->
-    debug "Query".green + "::reduceFn(reduction, features)" +" // deep comparison".grey
-    unless features?
-      debug "Query".green + "::reduceFn: end condition"
-      return reduction
-
-    query = reduction.query
-    #debug "reduction: " + pretty reduction
-    #debug "features: "+pretty features
-
-    weight = 0
-    factors = []
-
-    nb_feats = 0
-    #debug "query.where: "+pretty where
-
-    for where in query.where
-      #debug "where: " + pretty where
-      depth = 0
-      complexity = 0
-
-      for [type, key, value] in features
-
-        #debug [type, key, value]
-
-        if key of where
-
-          whereValues = if utils.isArray where[key]
-              where[key]
-            else
-              [where[key]]
-
-          match = no
-
-          for whereValue in whereValues
-
-            switch type
-              when 'String'
-                value = "#{value}"
-                whereValue = "#{whereValue}"
-                if ' ' in value or ' ' in whereValue
-                  [_depth,_nb_feats] = text.distance value, whereValue
-                  depth += _depth
-                  nb_feats += _nb_feats
-                  match = yes
-                else
-                  if value is whereValue
-                    depth += 1
-                    match = yes
-
-              when 'Number'
-                whereValue = (Number) whereValue
-                if !isNaN(whereValue) and isFinite(whereValue)
-                  delta = Math.abs value - whereValue
-                  # bad performance if we use 2/1 on sonar dataset
-                  depth += 1 / (1 + delta)
-                  match = yes
-
-
-              when 'Boolean'
-                if ((Boolean) value) is ((Boolean) whereValue)
-                  depth += 1
-                  match = yes
-
-              else
-                debug "type #{type} not supported"
-
-          if match
-            nb_feats += 1
-
-      # these parameters depends on the plateform
-      depth *= Math.min 6, 300 / nb_feats
-      weight += 10 ** Math.min 300, depth
-
-    for [type, key, value] in features
-      #debug "key: "+key
-
-      if query.select?
-        unless key of query.select
-          continue
-
-      #debug "here"
-      unless key of reduction.types
-        reduction.types[key] = type
-
-      # TODO put the 4 following lines before the "continue unless"
-      # if you want to catch all results
-      unless key of reduction.result
-        reduction.result[key] = {}
-
-      unless value of reduction.result[key]
-        reduction.result[key][value] = 0
-
-
-      #debug "match for #{key}: #{query.select[key]}"
-
-      match = no
-      if query.select?
-        if utils.isArray query.select[key]
-          #debug "array"
-          if query.select[key].length
-            if value in query.select[key]
-              #debug "SELECT match in array!"
-              match = yes
-          else
-            #debug "empty"
-            match = yes
-        else
-          #debug "not array"
-          if value is query.select[key]
-            #debug "SELECT match single value!"
-            match = yes
-      else
-        match = yes
-
-      if match
-        reduction.result[key][value] += weight
-
-    debug "Query".green + "::_reduceFn: reducing"
-    #debug pretty reduction
-    return reduction
-
-  _sortFn: (input, cb) ->
-    debug "Query".green + "::_sortFn(input, cb?)"+" // sort options by probability".grey
-    output = input.sort (a,b) -> b[2] - a[2]
-    if cb?
-      cb output
-      return undefined
-    else
-      return output
-
-  _toBestFn: (args) ->
-    debug "Query".green + "::_toBestFn(args)"
-    {result, types} = args
-
-    output = {}
-    for key, options of result
-      isNumerical = types[key] is 'Number'
-
-      if utils.isNumerical
-
-        sum = 0
-        for option, weight of options
-          sum += weight
-
-        output[key] = 0
-        for option, weight of options
-          option = (Number) option
-          output[key] += option * (weight / sum)
-
-      else
-        output[key] = []
-        for option, weight of options
-          if types[key] is 'Boolean'
-            option = (Boolean) option
-          output[key].push [option, weight]
-        output[key].sort (a,b) -> b[1] - a[1]
-        best = output[key][0] # get the best
-        output[key] = best[0] # get the value
-
-    if cb?
-      cb output
-      return undefined
-    else
-      return output
-
-
-  # convert a key:{ opt_a:3, opt_b: 4}
-  _toAllFn: (args, cb) ->
-
-    debug "Query".green + "::_toAllFn(args, cb?)"+"  // cast output map to typed array"
-
-    __toAllFn = (args) ->
-      debug "Query".green + "::_toAllFn:__toAllFn(#{pretty args})"
-      res = {}
-      for key, options of args.result
-        res[key] = if args.types[key] is 'Number'
-            debug "Query".green + "::_toAllFn:__toAllFn: Number -> #{key}"
-            for option, weight of options
-              [key, (Number) option, weight]
-          else if args.types[key] is 'Boolean'
-            debug "Query".green + "::_toAllFn:__toAllFn: Boolean -> #{key}"
-            for option, weight of options
-              [key, (Boolean) option, weight]
-          else
-            debug "Query".green + "::_toAllFn:__toAllFn: String -> #{key}"
-            for option, weight of options
-              [key, option, weight]
-    if cb?
-      result = __toAllFn args
-      cb result
-      return undefined
-    else
-      result = __toAllFn args
-      return result
-
-
-  all: (cb) ->
-    debug "Query".green + "::all(cb?)"
-    @_mode = 'all'
-    if cb? then @_async(cb) else @_sync()
-
-  best: (cb) ->
-    debug "Query".green + "::mix(cb?)"
-    @_mode = 'best'
-    if cb? then @_async(cb) else @_sync()
-
-  replace: (cb) ->
-    debug "Query".green + "::replace(cb?)"
-    @_mode = 'replace'
-    if cb? then @_async(cb) else @_sync()
-
-
-  # toArray = get sync
-  _sync: ->
-    debug "Query".green + "::_sync()"
-
-    ctx =
-      reduction:
-        query: @_query
-        result: {}
-        types: {}
-
-    debug "Query".green + "::_sync: @_db.eachFeatureSync:"
-    @_db.eachFeaturesSync (features, isLastItem) =>
-      debug "Query".green + "::_sync: @_db.eachFeatureSync(#{pretty features}, #{pretty isLastItem})"
-      ctx.reduction = @_reduceFn ctx.reduction, features
-
-    results = switch @_mode
-      when 'all'
-        debug "Query".green + "::_sync: all: @_toAllFn(#{pretty ctx.reduction})"
-        results = @_toAllFn ctx.reduction
-        @_sortFn results
-
-      when 'best'
-        debug "Query".green + "::_sync: best: @_toBestFn(#{pretty ctx.reduction})"
-        @_toBestFn ctx.reduction
-
-      when 'replace'
-        debug "Query".green + "::_sync: fix: @_toBestFn(#{pretty ctx.reduction})"
-        result = @_toBestFn ctx.reduction
-
-        obj = ctx.reduction.query.replace
-        for k,v of result
-          if !obj[k]?
-            obj[k] = v
-        obj
-
-
-    debug "Query".green + "::_sync: return #{pretty results}"
-    results
-
-  onError: (cb) ->
-    debug "Query".green + "::onError(cb)"
-    @_onError = cb
-
-  # onComplete = get async
-  _async: (cb) ->
-
-    debug "Query".green + "::_async(cb)"
-
-    ctx =
-      reduction:
-        query: @_query
-        result: {}
-        types: {}
-
-    debug "Query".green + "::_async: @_db.eachFeatureAsync:"
-    @_db.eachFeaturesAsync (features, isLastItem) =>
-      debug "Query".green + "::_async: @_db.eachFeatureAsync(#{pretty features}, #{pretty isLastItem})"
-
-      debug "Query".green + "::_async: @_reduceFn(ctx.reduction, features)"
-      ctx.reduction = @_reduceFn ctx.reduction, features
-      return unless isLastItem
-      debug "Query".green + "::_async: isLastItem == true"
-
-      results = switch @_mode
-        when 'all'
-          # sync
-          debug "Query".green + "::_async: all: @_toAllFn(ctx.reduction, cb)"
-          @_toAllFn ctx.reduction, (results) =>
-
-            # sync too
-            debug "Query".green + "::_async: all: @_sortFn(results, cb)"
-            @_sortFn results, (results) =>
-
-              debug "Query".green + "::_async: all: cb(results)"
-              cb results
-
-        when 'best'
-          debug "Query".green + "::_async: best: @_toBestFn(#{pretty ctx.reduction})"
-          @_toBestFn ctx.reduction, (best) =>
-
-            debug "Query".green + "::_async: best: cb(results)"
-            cb results
-
-        when 'fix'
-          debug "Query".green + "::_async: fix: @_toBestFn(#{pretty ctx.reduction})"
-          @_toBestFn ctx.reduction, (best) =>
-            obj = ctx.reduction.query.replace
-            for k,v of result
-              if !obj[k]?
-                obj[k] = v
-            obj
-            cb obj
-
-    return undefined
-
-class File
-  constructor: (@_fussy, @_url) ->
-
-    parsed = Url.parse @_url
-
-    @_path = parsed.path
-
-    if !parsed.protocol?
-      @_path = @_url
-
-
-  # actually, even if we are synchronous, we could do something smarter
-  # using the low level file read (ie. only load the file chunk by chunk,
-  # synchronously)
-  eachSync: (cb) ->
-    debug "File".blue + "::eachSync(cb)"
-    fs = require 'fs'
-    str = fs.readFileSync @_path, 'utf-8'
-    lines = str.split('\n')
-    i = 0
-    for line in lines
-      cb line, no
-      i += 1
-    cb undefined, yes
-
-
-  eachAsync: (cb) ->
-    debug "File".blue + "::eachAsync(cb)"
-    fs = require 'fs'
-    readline = require 'readline'
-    stream = require 'stream'
-
-    instream = fs.createReadStream @_path
-    outstream = new stream
-    rl = readline.createInterface instream, outstream
-
-    i = 0
-    rl.on 'line', (line) ->
-      cb line, no
-      i += 1
-
-    rl.on 'close', ->
-      cb undefined, yes
-
-    return undefined
-
-class Mongo
-
-  constructor: (@_fussy, @_url) ->
-
-    parsed = Url.parse @_url
-
-    @_host = parsed.hostname ? '127.0.0.1'
-    @_port = (Number) (parsed.port ? '27017')
-
-    path   = parsed.path ? '/fussy/fussy'
-    @_database   = path[0]
-    @_collection = path[1]
-
-    @_batchSize = 1024
-
-  # iterate synchronously over a mongo collection
-  eachSync: (cb) ->
-    debug 'Mongo::eachSync'
-
-    limit = @_fussy.limit()
-    skip = @_fussy.skip()
-
-    Server = require('mongo-sync').Server
-
-    db = new Server @_host
-
-    debug "Mongo".blue + "::eachSync: gettin cursor on database and collection"
-    cursor = db
-      .db(@_database)
-      .getCollection(@_collection)
-      .find()
-
-    if skip?
-      debug "Mongo".blue + "::eachSync: skipping #{skip} results of collection"
-      cursor = cursor.skip skip
-
-    if limit?
-      debug "Mongo".blue + "::eachSync: limiting #{limit} results of collection"
-      cursor = cursor.limit limit
-
-    results = cursor.toArray()
-
-    i = 0
-    size = results.length
-    for item in results
-      cb item, no
-    cb undefined, yes
-    db.close()
-    return undefined
-
-  # iterate asynchronously over a mongo collection
-  eachAsync: (cb) ->
-    debug "Mongo".blue + "::eachAsync(cb)"
-
-    MongoClient = require('mongodb').MongoClient
-    collection = @_collection
-    limit = @_fussy.limit()
-    skip = @_fussy.skip()
-    delay = 0 # async delay
-
-    debug "Mongo".blue + "::eachAsync: connecting to mongo (#{@_host}:#{@_port})"
-    MongoClient.connect "mongodb://#{@_host}:#{@_port}/#{_database}", (err, db) ->
-      throw err if err
-
-      debug "Mongo".blue + "::eachAsync: gettin cursor on database and collection"
-      cursor = db
-        .collection(collection)
-        .find()
-
-      if skip?
-        debug "Mongo".blue + "::eachSync: skipping #{skip} results of collection"
-        cursor = cursor.skip skip
-
-      if limit?
-        debug "Mongo".blue + "::eachSync: limiting #{limit} results of collection"
-        cursor = cursor.limit limit
-
-      cursor = cursor
-        .batchSize(@_batchSize)
-
-      # this function is closure-safe (we could put it outside in a library)
-      _readCursor = (cursor, i, delay, db, next) ->
-        cursor.nextObject (err, item) ->
-          debug "Mongo".blue + "::eachAsync:_readCursor: cursor.nextObject(function(err, item){})"
-          throw err if err
-          if item
-            debug "                          - returned an item"
-            cb item, yes
-            fn = -> next(cursor, i+1, delay)
-            setTimeout fn, delay
-          else
-            debug "                          - returned nothing: end reached"
-            cb undefined, yes
-            db.close()
-
-      debug "Mongo".blue + "::eachAsync: calling _readCursor(cursor, 0, delay, db, next)"
-      _readCursor(cursor, 0, delay, db, _readCursor)
-    return undefined
 
 class Fussy
 
-  constructor: (input) ->
+  constructor: (input, @_debugEnabled) ->
+
 
     @_skip = undefined # 0
     @_limit = undefined # Infinity
 
-    parsed = Url.parse input
+    @_firstLine = yes
+    @_custom_schema = no
 
-    switch parsed.protocol
-      when 'rest:','http:','http+rest:','http+json', 'https:','https+rest:','https+json'
-        debug "Fussy".yellow + "::constructor: protocol is http rest"
-        throw "http rest protocol is not supported yet"
+    if utils.isArray input
+      @_engine = new List @, input
 
-      when 'file:','file+csv:','file+json:','file+txt:'
-        debug "Fussy".yellow + "::constructor: protocol is file"
-        @_engine = new File @, input
+    else if utils.isString input
 
-      when 'mongo:', 'mongodb:'
-        debug "Fussy".yellow + "::constructor: protocol is MongoDB"
-        @_engine = new Mongo @, input
+      parsed = Url.parse input
 
-      else #when undefined
-        debug "Fussy".yellow + "::constructor: protocol is default (file)"
-        @_engine = new File @, input
+      switch parsed.protocol
+        when 'rest:','http:','http+rest:','http+json', 'https:','https+rest:','https+json'
+          @_debug "constructor: protocol is http rest"
+          @_engine new Http @, input
 
+        when 'file:','file+csv:','file+json:','file+txt:'
+          @_debug "constructor: protocol is file"
+          @_engine = new File @, input
+
+
+        when 'mongo:', 'mongodb:'
+          @_debug "constructor: protocol is MongoDB"
+          @_engine = new Mongo @, input
+
+        else #when undefined
+          @_debug "constructor: protocol is default (file)"
+          @_engine = new File @, input
+    else
+      throw "unsupported input type"
+
+
+  debug: (enabled) ->
+    @_debugEnabled = enabled
+    @
+
+  _debug: (x) ->
+    return unless @_debugEnabled
+    console.log "Fussy".yellow  + "::".grey + x
+
+  ###
+
+  ###
   _parse: (input) ->
 
-    #debug "Fussy".yellow + "::_parse(input) " +"  // convert raw chunk into full featured object".grey
-    #debug input
+    # fear not, nor be ye dismayed at the sight of the decision tree
+
+    #@_debug "_parse(input) " +"  // convert raw chunk into full featured object".grey
+
     output = undefined
-    #debug "map: extracting features from "+JSON.stringify input
 
     # do we have a schema defined?
     if @_schema?
-      debug "Fussy".yellow + "::_parse: using schema"
+      @_debug "_parse: using schema"
       if utils.isString input
-        #debug "Fussy".yellow + "::_parse: trying to parse csv line using schema"
-        #debug "Fussy".yellow + "::_parse: line: "+input
+        #@_debug "_parse: trying to parse csv line using schema"
+        #@_debug "_parse: line: "+input
+        if @_custom_schema
+          @_debug "_parse: this is a custom schema, we need to update it"
+          try
+            tmp = csvString.parse(input)[0]
+            i = 0
+            for item in tmp
+              value = (Number) item
+              @_debug "_parse: #{value} = (Number) #{item}"
+              if value? and !isNaN(value) and isFinite(value)
+                @_schema[i][1] = 'Number'
+              i += 1
+            @_debug "_parse: updated schema: #{pretty @_schema}"
+          catch exc
+            @_debug "_parse: schema update failed: #{exc}"
+
         try
           output = utils.parse @_schema, input
         catch exc
-          #debug exc
-          debug "Fussy".yellow + "::_parse: couldn't parse input, trying to parse json from string"
+          #@_debug exc
+          @_debug "_parse: couldn't parse input, trying to parse json from string"
           try
             output = JSON.parse input
           catch exc
-            #debug exc
-            debug "Fussy".yellow + "::_parse: couldn't parse json input. I could use the object as is, but since you defined a schema I prefer to skip it"
+            #@_debug exc
+            @_debug "_parse: couldn't parse json input. I could use the object as is, but since you defined a schema I prefer to skip it"
             output = undefined
       else
+        @_debug "_parse: object is not a string, so we won't parse it"
         output = input
 
     else if utils.isString input
-      debug "Fussy".yellow + "::_parse: no schema, trying to parse json from string"
-      output = JSON.parse input
+      @_debug "_parse: no schema, trying to parse json from string"
+      try
+        output = JSON.parse input
+      catch exc
+        @_debug exc
+        @_debug "_parse: uh-oh, not a JSON. Trying CSV.."
+        try
+          tmp = csvString.parse(input)[0]
+          output = {}
+
+          if !@_schema?
+
+            @_debug "_parse: no schema! trying to detect if the row is a header.."
+
+            @_custom_schema = yes
+
+            @_schema = for item in tmp
+              [item, 'String']
+
+            inputIsProbablyHeader = do ->
+              for item in tmp
+                value = (Number) item
+                if value? and !isNaN(value) and isFinite(value)
+                  @_debug "_parse: definitely not a header"
+                  return no
+              @_debug "_parse: maybe a header?"
+              return yes
+
+            if inputIsProbablyHeader
+              @_debug "_parse: input looks like a header, writing schema and skipping"
+            else
+              @_debug "_parse: not a header, so creating dummy schema and re-parsing input"
+              return @_parse input
+
+        catch exc2
+          @_debug exc2
+          @_debug "_parse: document is not a JSON object and not a CSV array: skipping it".yellow
+
     else
-      debug "Fussy".yellow + "::_parse: no schema, using js object as-is"
+      @_debug "_parse: object is not a string, so we won't parse it"
       output = input
-    debug "Fussy".yellow + "::_parse: #{pretty input} =====> #{pretty output}"
-    #debug "extracting output"
+    @_debug "_parse: #{pretty input} =====> #{pretty output}"
+    #@_debug "extracting output"
     output
 
   _extract: (event, facts=[], prefix="") ->
-    debug "Fussy".yellow + "::_extract(event)"
+    @_debug "_extract(event)"
     #console.log "extracting features from: #{JSON.stringify event}"
     ###
     This was supposed to be a built-in support for a "date" attribute
@@ -586,37 +175,35 @@ class Fussy
     #    facts.push ['Date', 'date', moment(event.date).format()]
     #    delete event['date']
 
-    try
-      for key, value of event
 
-        key = prefix + key
-        #console.log "key: #{key}"
+    for key, value of event
 
-        # TODO we should use in priority the schema for this, then only detect type
-        # as a fallback
+      key = prefix + key
+      #console.log "key: #{key}"
 
-        if utils.isString value
-          #console.log "String"
-          facts.push ['String', key, value]
+      # TODO we should use in priority the schema for this, then only detect type
+      # as a fallback
 
-        else if utils.isArray value
-          #console.log "Array"
-          facts.push ['Array', key, value]
+      if utils.isString value
+        @_debug "_extract: String"
+        facts.push ['String', key, value]
 
-        else if utils.isNumber value
-          #console.log "Number"
-          facts.push ['Number', key, value]
+      else if utils.isArray value
+        @_debug "_extract: Array"
+        facts.push ['Array', key, value]
 
-        else if utils.isBoolean value
-          #console.log "Boolean"
-          facts.push ['Boolean', key, value]
+      else if utils.isNumber value
+        @_debug "_extract: Number"
+        facts.push ['Number', key, value]
 
-        else
-          #console.log "recursive"
-          @_extract value, facts, key + "." # recursively flatten nested features
-    catch exc
-      console.log "failed: "+exc
-      console.log exc
+      else if utils.isBoolean value
+        @_debug "_extract: Boolean"
+        facts.push ['Boolean', key, value]
+
+      else
+        #console.log "recursive"
+        @_extract value, facts, key + "." # recursively flatten nested features
+
 
     #console.log "facts: " + JSON.stringify facts
     facts
@@ -629,22 +216,17 @@ class Fussy
   limit: (limit) ->
     return @_limit unless limit?
     throw "limit must be >= 0" if limit < 0
-    debug "Fussy".yellow + "::limit(value) " + " // setting limit to ".grey + "#{pretty limit}"
+    @_debug "limit(value) " + " // setting limit to ".grey + "#{pretty limit}"
     @_limit = limit
     @
 
   skip: (skip) ->
     return @_skip unless skip?
     throw "skip must be >= 0" if skip < 0
-    debug "Fussy".yellow + "::skip(value) " + " // setting skip to ".grey + "#{pretty skip}"
+    @_debug "skip(value) " + " // setting skip to ".grey + "#{pretty skip}"
     @_skip = skip
     @
 
-  debug: (enabled) ->
-    return debugEnabled unless enabled?
-    debug "Fussy".yellow + "::debug(value) " + " // setting debug to ".grey + "#{pretty enabled}"
-    debugEnabled = enabled
-    @
 
   ###
   Call a function on each item, synchronously
@@ -652,9 +234,9 @@ class Fussy
   This functions skips invalid items
   ###
   eachFeaturesSync: (cb) ->
-    debug "Fussy".yellow + "::eachFeaturesSync(cb)"
+    @_debug "eachFeaturesSync(cb)"
     @_engine.eachSync (item, eof) =>
-      debug "Fussy".green + "::eachFeaturesSync: @_engine.eachSync (item=#{pretty item}, eof=#{pretty eof})"
+      @_debug "eachFeaturesSync: @_engine.eachSync (item=#{pretty item}, eof=#{pretty eof})"
 
       # if end reached, return immediately
       if eof
@@ -670,10 +252,10 @@ class Fussy
   ###
   Call a function on each item, asynchronously
   ###
-  eachFeaturesAsync: (cb) => detach =>
-    debug "Fussy".yellow + "::eachFeaturesAsync(cb)"
+  eachFeaturesAsync: (cb) =>
+    @_debug "eachFeaturesAsync(cb)"
     @_engine.eachAsync (item, eof) =>
-      debug "Fussy".green + "::eachFeaturesAsync: @_engine.eachAsync (item=#{pretty item}, eof=#{pretty eof})"
+      @_debug "eachFeaturesAsync: @_engine.eachAsync (item=#{pretty item}, eof=#{pretty eof})"
 
 
       # if end reached, return immediately
@@ -686,13 +268,16 @@ class Fussy
       features = @_extract extracted
       return unless features
       cb features, eof
+    return
 
   onComplete: (onCompleteCb) ->
-    debug "Fussy".yellow + "::_onCompleteCb = onCompleteCb"
+    @_debug "_onCompleteCb:(onCompleteCb)"
     @_onCompleteCb = onCompleteCb
     @
 
   query: (query) ->
+    unless query?
+      throw "Error: Fussy.query cannot be called without parameters".red
     new Query @, query
 
   ###
@@ -700,6 +285,9 @@ class Fussy
   Only fields that are undefined will be filled, others will be left untouched
   ###
   repair: (obj, cb) ->
+    unless obj?
+      throw "Error: Fussy.repair cannot be called without parameters".red
+    #if utils.isArray(obj) and obj.length > 0
 
     query = new Query @,
       replace: obj
@@ -713,8 +301,37 @@ class Fussy
 
     query.replace cb
 
-
+  ###
+  Return the solution to an uncomplete json object
+  ###
   solve: (obj, cb) ->
+    unless obj?
+      throw "Error: Fussy.solve cannot be called without parameters".red
+
+    @_debug "solve(obj, cb)"
+    query = new Query @,
+      select: Object.keys(obj)
+      where: do ->
+        newObj = {}
+        for key in Object.keys(obj)
+          if obj[key]?
+            newObj[key] = obj[key]
+        newObj
+
+    query.best cb
+
+  ###
+  Return a new json object with random attribute value, depending on the
+  probability of each
+  there is an optional argument, 'n', to specify the number of desired instances
+  ###
+  pick: (obj, n, cb) ->
+
+    @_debug "pick(obj, n, cb)"
+    n = if utils.isNumber(n) then n else 1
+    cb = if utils.isFunction(n) then n else cb
+
+    obj ?= {}
 
     query = new Query @,
       select: Object.keys(obj)
@@ -725,17 +342,48 @@ class Fussy
             newObj[key] = obj[key]
         newObj
 
-    query.best()
+    query.pick n, cb
 
-module.exports =
+  ###
+  generate() generates a generator function
+  ###
+  generate: (obj, cb) ->
+    @_debug "generate(obj, cb)"
+    obj ?= {}
 
-  debug: (enabled) ->
-    debugEnabled = enabled
-    @
+    query = new Query @,
+      select: Object.keys(obj)
+      where: do ->
+        newObj = {}
+        for key in Object.keys(obj)
+          if obj[key]?
+            newObj[key] = obj[key]
+        newObj
 
-  pretty: utils.pretty
-  pperf: utils.pperf
-  pstats: utils.pstats
+    query.generate cb
 
-  input: (input) ->
-    new Fussy input
+  ###
+  test some data (this is a WIP, to replace the bench object)
+  ###
+  test: (input, cb) ->
+    testDataset = module.exports.input input
+
+    if cb?
+      @_debug "test: async"
+      @eachFeaturesAsync (item, eof) =>
+        0
+    else
+      @_debug "test: sync"
+      @eachFeaturesSync (item, eof) =>
+        0
+
+module.exports = (input) ->
+  new Fussy input, module.exports._debugEnabled
+
+module.exports.debug = (enabled) ->
+  module.exports._debugEnabled = enabled
+  module.exports
+
+module.exports.pretty = utils.pretty
+module.exports.pperf = utils.pperf
+module.exports.pstats = utils.pstats

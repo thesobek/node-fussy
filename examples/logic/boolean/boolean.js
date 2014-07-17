@@ -1,7 +1,7 @@
 var Fussy = require('fussy');
 
-Fussy
-  .open('file://truth-table.csv', ['rule','P','Q','R'])
+Fussy('file://truth-table.csv')
+  .schema(['rule','P','Q','R'])
   .query({
     select: 'rule',
     where: [

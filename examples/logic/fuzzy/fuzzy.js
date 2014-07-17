@@ -1,8 +1,8 @@
 var Fussy = require('fussy');
 
 console.log(
-  new Fussy()
-  .import('truth-table.csv', [
+  Fussy('truth-table.csv')
+  .schema([
       ['rule', 'String'],
       ['P',    'Number'],
       ['Q',    'Number'],

@@ -4,7 +4,8 @@
   "version": "0.2.0",
   "author": "Julian Bilcke <julian.bilcke@gmail.com>",
   "scripts": {
-    "test": "node_modules/mocha/bin/mocha --bail --require chai --compilers coffee:coffee-script test/*.coffee",
+    "test": "node_modules/mocha/bin/mocha --require chai --compilers coffee:coffee-script/register tests/*.coffee",
+    "quicktest": "node_modules/mocha/bin/mocha --bail --require chai --compilers coffee:coffee-script/register tests/*.coffee",
     "build": "coffee --compile --output lib/ src/",
     "watch": "coffee --watch --compile --output lib/ src/"
   },
@@ -22,17 +23,23 @@
     "csv-string": "^2.1.1",
     "moment": "^2.5.1",
     "progressbar": "^1.0.3",
-    "async": "^0.9.0",
-    "ya-csv": "^0.9.3",
     "mongodb": "^1.4.7",
-    "lazy.js": "^0.3.2",
     "unzip": "^0.1.9",
     "mime": "^1.2.11",
-    "mongo-sync": "^0.2.4"
+    "mongo-sync": "^0.2.4",
+    "ls-archive": "^1.0.1",
+    "underscore": "^1.6.0",
+    "request": "^2.37.0",
+    "httpsync": "0.0.8"
   },
   "devDependencies": {
+    "mocha": "^1.20.1",
     "coffee-script": "^1.7.1",
     "chai": "^1.9.1",
-    "mocha": "^1.18.2"
+    "chai-interface": "^1.1.0",
+    "chai-fuzzy": "^1.4.0",
+    "chai-change": "^1.0.0",
+    "chai-stats": "^0.3.0",
+    "intercept-stdout": "0.0.2"
   }
 }
