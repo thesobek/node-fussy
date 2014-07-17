@@ -12,10 +12,11 @@ csvString = require 'csv-string' # csv row parser
 utils   = require './utils'
 
 # protocols
-List    = require './protocols/list'
-File    = require './protocols/file'
-Http    = require './protocols/http'
-Mongo   = require './protocols/mongo'
+List    = require './protocols/list'  # arrays
+File    = require './protocols/file'  # single csv file
+Glob    = require './protocols/glob'  # multiple json files
+Http    = require './protocols/http'  # remove csv files
+Mongo   = require './protocols/mongo' # mongodb collections
 
 Query  = require './query'
 
@@ -47,7 +48,10 @@ class Fussy
 
         when 'file:','file+csv:','file+json:','file+txt:'
           @_debug "constructor: protocol is file"
-          @_engine = new File @, input
+          if parsed.path[-1..] is '/' or parsed.path.match /\*/
+            @_engine = new Glob @, input
+          else
+            @_engine = new File @, input
 
 
         when 'mongo:', 'mongodb:'
@@ -56,7 +60,11 @@ class Fussy
 
         else #when undefined
           @_debug "constructor: protocol is default (file)"
-          @_engine = new File @, input
+          if parsed.path[-1..] is '/' or parsed.path.match /\*/
+            @_engine = new Glob @, input
+          else
+            @_engine = new File @, input
+
     else
       throw "unsupported input type"
 

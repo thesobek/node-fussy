@@ -15,12 +15,12 @@ For instance I am using it to solve some [basic machine learning problems](https
 and it is pretty fun!
 
 My goal is to make it scale on larger datasets (more than 20.000 items) but
-there still a long road.
+there is still a long road.
 
 ## Notes / Todo
 
 - Nested objects are UNSUPPORTED. Tell me if you really need this feature.
-- Larges datasets are slow to process. That's normal:
+- Large datasets are slow to process. That's normal:
   The algorithm is `O(N*M)` (N: nb of objects to test, M: nb of objects in the database)
 - See if we could speed things up by using other machine learning techniques,
   Or parallelize the job
@@ -55,7 +55,7 @@ Fussy('my/docs/*.json')
 
   - `limit(Number)`: limits to N objects
 
-  - `debug(true|false)`: shows or hide verbose debug log (in the standard output)
+  - `debug(Boolean)`: shows or hide verbose debug log (in the standard output)
 
 These functions configure and returns the stream, so you can chain them.
 
@@ -75,12 +75,20 @@ If you need quick debugging, or are writing a simple command-line script, you ca
 
 Now we can dive into the advanced features:
 
+### Overview of supported input sources:
+
+- `Fussy([{},{},..])`: Loads an array of Objects
+- `Fussy('file.csv')`: Single CSV file
+- `Fussy('*/*.json')`: Collection of local JSON files
+- `Fussy('http://../foo.csv')`: Remote csv files
+- `Fussy('mongo://../a/b')`: MongoDB collections
+
 ### Using a CSV source file
 
 #### Basic CSV file
 
 ```javascript
-Fussy('test.csv')
+var db = Fussy('test.csv');
 ```
 
 #### Trimmed CSV file
@@ -88,30 +96,96 @@ Fussy('test.csv')
  Load a CSV, skipping the first line, and keeping the 100 next lines:
 
 ```javascript
-Fussy('test.csv')
-  .skip(1)
-  .limit(100)
+var db = Fussy('test.csv').skip(1).limit(100);
 ```
+
 #### Alternative syntax
 
  You can also use an URL with the `file:` protocol:
 
 ```javascript
-Fussy('file://test.csv')
+var db = Fussy('file://test.csv');
 ```
 
-#### Typecasting CSV columns
+#### Alternative file path syntax
 
-By default, Fussy will scratch its head and try to figure out what kind of data it deals with.
+ You can also use an URL with the `file:` protocol:
 
+```javascript
+var db = Fussy('file://test.csv');
+```
+
+### Using a data schema
+
+Default settings are enough in most cases. Fussy will try to:
+
+  - use the first line to name columns, unless the header looks like data
+  - figure out what kind of data you have (strings or numbers?)
+
+However in some cases it won't work, and you will have to override the header.
+
+or this, just skip the first line using `.skip(1)` and define a `Schema`:
+
+
+```javascript
+var db = Fussy('thermal.csv').skip(1).schema([
+  'day',
+  'temperature'
+]);
+```
+
+Each item of the list correspond to a column in the CSV.
+
+An item is a list of params :the first one is the column name, and the second one is the type (which is optional).
+
+```javascript
+var db = Fussy('thermal.csv').skip(1).schema([
+    ['day','String'],
+    ['temperature','Number']
+]);
+```
+
+#### Type casting
+
+Type must be Capitalized and one of these:
+
+  - `'Number'`: continuous values (will use `1 / (1 + |a| - |b|)` for comparison)
+  - `'Enum'`: discrete, enumeration-like values (will use boolean comparison)
+  - `'String'`: discrete text values (will use a basic string distance comparison)
+  - `'Boolean'`: boolean values (compared with boolean equality, discrete). Not quite supported at the moment.
+
+For `Enum` type, you can also pass a key/value map, instead of writing "Enum".
+Make sure you made no typos in the keys, or else weird things will happen.
+
+```javascript
+var db = Fussy('thermal.csv').skip(1).schema([
+    ['day', {
+      'mon': 'Monday',
+      'tue': 'Tuesday',
+      'wed': 'Wednesday',
+      'thu': 'Thursday',
+      'fri': 'Friday',
+      'sat': 'Saturday',
+      'sun': 'Sunday'
+      }],
+    ['temperature','Number']
+]);
+```
+
+Finally, you can also use an external schema file:
+
+```javascript
+var db = Fussy('thermal.csv').skip(1).schema('schema.json');
+```
 
 ### Using a remote file
 
-*Note: for the moment this is available for asynchronous trigger calls only.*
-
 ```javascript
-Fussy('http://foo.bar/data/set.csv')
+var remote = Fussy('http://foo.bar/data/set.csv');
 ```
+
+Note: for the moment, there is no caching: it will re-connect and re-download content each time you call a trigger.
+
 ### Using a MongoDB collection
 
 *Note: NOT TESTED, MIGHT BE BROKEN, WARNING WARNING*
@@ -127,3 +201,11 @@ function on a Fussy stream.
 
 Creating a query returns a new one immediately, and most Query functions are
 asyncronous, too, until you call one of the trigger functions:
+
+
+## TODO
+
+- run multiples queries at once (because streaming / iterating over a collection is more costly than iterating over queries, which stay in memory)
+- implement caching? something like: `fussy.cache(length: 1000, timeout: 3600)`
+- parallelize using forks?
+- find a clean way to run it with Hadoop / MapReduce?
