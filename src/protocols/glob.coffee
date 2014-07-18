@@ -101,4 +101,4 @@ class Glob
               cb obj, isLast
 
 
-module.exports = File
+module.exports = Glob

@@ -170,14 +170,6 @@ class Query
     #@_debug pretty reduction
     return reduction
 
-  _sortFn: (input, cb) ->
-    @_debug "_sortFn(input, cb?)"+" // sort options by probability".grey
-    output = input.sort (a,b) -> b[2] - a[2]
-    if cb?
-      cb output
-      return undefined
-    else
-      return output
 
   _toBestFn: (args, cb) ->
     @_debug "_toBestFn(args)"
@@ -220,22 +212,33 @@ class Query
 
     @_debug "_toAllFn(args, cb?)"+"  // cast output map to typed array"
 
-    __toAllFn = (args) =>
-      @_debug "_toAllFn:__toAllFn(#{pretty args})"
-      res = {}
-      for key, options of args.result
-        res[key] = if args.types[key] is 'Number'
-            @_debug "_toAllFn:__toAllFn: Number -> #{key}"
-            for option, weight of options
-              [key, (Number) option, weight]
-          else if args.types[key] is 'Boolean'
-            @_debug "_toAllFn:__toAllFn: Boolean -> #{key}"
-            for option, weight of options
-              [key, (Boolean) option, weight]
-          else
-            @_debug "_toAllFn:__toAllFn: String -> #{key}"
-            for option, weight of options
-              [key, option, weight]
+    __toAllFn = (_args) =>
+      @_debug "_toAllFn:__toAllFn()"
+
+      for key, options of _args.result
+        sorted = []
+        if _args.types[key] is 'Number'
+          @_debug "_toAllFn:__toAllFn: Number -> #{key}"
+          for option, weight of options
+            #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
+            sorted.push [((Number) option),  weight]
+            #@_debug "pushed: #{all}"
+
+        else if _args.types[key] is 'Boolean'
+          @_debug "_toAllFn:__toAllFn: Boolean -> #{key}"
+          for option, weight of options
+            #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
+            sorted.push [((Boolean) option), weight]
+        else
+          @_debug "_toAllFn:__toAllFn: String -> #{key}"
+          for option, weight of options
+            #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
+            sorted.push [option, weight]
+
+        _args.result[key] = sorted.sort (a,b) -> b[1] - a[1]
+
+      _args.result
+
     if cb?
       result = __toAllFn args
       cb result
@@ -289,9 +292,8 @@ class Query
 
     results = switch @_mode
       when 'all'
-        @_debug "_sync: all: @_toAllFn(#{pretty ctx})"
-        results = @_toAllFn ctx
-        @_sortFn results
+        @_debug "_sync: all: @_toAllFn()"
+        @_toAllFn ctx
 
       when 'pick'
         @_debug "_sync: pick"
@@ -363,16 +365,12 @@ class Query
 
       switch @_mode
         when 'all'
-          # sync
+
           @_debug "_async: all: @_toAllFn(ctx, cb)"
           @_toAllFn ctx, (results) =>
 
-            # sync too
-            @_debug "_async: all: @_sortFn(results, cb)"
-            @_sortFn results, (results) =>
-
-              @_debug "_async: all: cb(results)"
-              cb results
+            @_debug "_async: all: cb(results)"
+            cb results
 
         when 'pick'
           @_debug "_sync: pick"
