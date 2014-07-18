@@ -28,7 +28,7 @@ describe 'solving a simple problem', ->
       )
 
     # should be left untouched
-    result.age.should.equal '18'
+    result.age.should.be.within(17 - 0.001, 20 + 0.001)
     result.category.should.equal 'student' # should be set
 
     ###

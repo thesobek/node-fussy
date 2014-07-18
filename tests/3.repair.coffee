@@ -43,7 +43,7 @@ expect(sync_dog).to.be.an.instanceof(Dog)
 sync_dog.should.have.interface
   name: String
   breed: String
-  size: String # that's an error, it should be: Number
+  size: Number
   bark: Function
 
 sync_dog.size.should.be.within(23, 28)
@@ -60,7 +60,7 @@ dogs.repair async_dog, ->
   async_dog.should.have.interface
     name: String
     breed: String
-    size: String # that's an error, it should be: Number
+    size: Number
     bark: Function
 
   async_dog.size.should.be.within(23, 28)

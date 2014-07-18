@@ -179,7 +179,7 @@ class Query
     for key, options of result
       isNumerical = types[key] is 'Number'
 
-      if utils.isNumerical
+      if isNumerical
 
         sum = 0
         for option, weight of options

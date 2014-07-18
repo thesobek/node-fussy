@@ -26,19 +26,30 @@ query = db.query
   where:
     category: 'pupil'
 
-result = query.all()
 
-
-expected =
+expectedAll =
   age: [
     [ 15, 1000000 ]
-     [ 18, 2 ]
-     [ 5, 1 ]
-     [ 17, 1 ]
-     [ 20, 1 ]
-     [ 23, 1 ]
-     [ 25, 1 ]
-     [ 30, 1 ]
-    ]
+    [ 18, 2 ]
+    [ 5, 1 ]
+    [ 17, 1 ]
+    [ 20, 1 ]
+    [ 23, 1 ]
+    [ 25, 1 ]
+    [ 30, 1 ]
+  ]
 
-result.should.deep.equal expected
+expectedBest =
+  age: 15
+
+result = query.all()
+result.should.deep.equal expectedAll
+
+query.all (result) ->
+  result.should.deep.equal expectedAll
+
+result = query.best()
+result.age.should.be.within(expectedBest.age - 0.001, expectedBest.age + 0.001)
+
+query.best (result) ->
+  result.age.should.be.within(expectedBest.age - 0.001, expectedBest.age + 0.001)
