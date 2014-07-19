@@ -26,10 +26,14 @@ class List
     # use master debug setting, unless we overloaded it for our protocol
     return unless (if @_debugEnabled? then @_debugEnabled else @_fussy._debugEnabled)
     console.log "List".blue + "::".grey + x
-    
+
   eachSync: (cb) ->
     @_debug "eachSync"
-    for item in @_list
+
+    skip = @_fussy._skip ? 0
+    limit = @_fussy._limit ? Infinity
+
+    for item in @_list[skip...(skip+limit)]
       cb item, no
     cb undefined, yes
     return
@@ -37,8 +41,12 @@ class List
   eachAsync: (cb) ->
     @_debug "eachAsync"
 
-    for item in @_list
+    skip = @_fussy._skip ? 0
+    limit = @_fussy._limit ? Infinity
+
+    for item in @_list[skip...(skip+limit)]
       cb item, no
+
     cb undefined, yes
     return
 

@@ -9,23 +9,67 @@ config =
 ###
 csv loaded like this will have (more or less) dynamic schemas
 ###
-echo Fussy(config.data.testUsers).skip(1).solve age: 18, category: undefined
 
-###
-will print: { age: 18, category: 'student' }
-###
+challenge =
+  age: 18
+  category: undefined
 
+res = Fussy(config.data.testUsers)
+  .skip(0)
+  .solve challenge
+
+res.age.should.be.within 17.999, 18.001
+res.category.should.equal 'student'
+
+Fussy(config.data.testUsers)
+  .skip(0)
+  .solve challenge, (res) ->
+
+    res.age.should.be.within 17.999, 18.001
+    res.category.should.equal 'student'
 
 
 ###
 You can also pass a schema to map columns to json attributes, useful if you have
 no header, or want better control over types
 ###
-db = Fussy(config.data.testUsers).skip(1).schema [
-  ['age', 'Number']
-  ['category','String']
+
+db = Fussy(config.data.testUsers)
+  .skip(1)
+  .schema [
+      ['age', 'Number']
+      ['category','String']
+    ]
+
+res = db.solve challenge
+
+
+res.age.should.be.within 17.999, 18.001
+res.category.should.equal 'student'
+
+
+db._schema.should.deep.equal [
+  [ 'age', 'Number' ]
+  [ 'category', 'String' ]
 ]
 
-echo db.solve
-  age: 18
-  category: undefined
+
+
+db = Fussy(config.data.testUsers)
+  .skip(1)
+  .schema [
+      ['age', 'Number']
+      ['category','String']
+    ]
+
+db.solve challenge, (res) ->
+
+
+  res.age.should.be.within 17.999, 18.001
+  res.category.should.equal 'student'
+
+
+  db._schema.should.deep.equal [
+    [ 'age', 'Number' ]
+    [ 'category', 'String' ]
+  ]

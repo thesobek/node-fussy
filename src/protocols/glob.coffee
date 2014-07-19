@@ -46,16 +46,30 @@ class Glob
 
     files = glob.sync @_path
 
+    skip = @_fussy._skip ? 0
+    limit = @_fussy._limit ? Infinity
+
+    jsonFiles = []
+
     for file in files
       type = mime.lookup file
 
-      unless type is 'application/json'
+      if type is 'application/json'
+        jsonFiles.push type
+
+      else
         @_debug "eachSync: files of type #{type} are not supported in synchronous mode"
-        continue
+
+    i = 0
+
+    jsonFiles = jsonFiles[skip...(skip+limit)]
+    m = jsonFiles.length
+
+    for jsonFile in jsonFiles
 
       obj = undefined
       try
-        obj = JSON.parse fs.readFileSync(file, 'utf8')
+        obj = JSON.parse fs.readFileSync file, 'utf8'
       catch exc
         @_debug "eachSync: couldn't read json file #{file}: #{exc}"
         continue
@@ -68,9 +82,13 @@ class Glob
   eachAsync: (cb) ->
     @_debug "eachAsync(cb)"
 
+    skip = @_fussy._skip ? 0
+    limit = @_fussy._limit ? Infinity
+
     glob.sync @_path, (err, files) =>
 
       jsonFiles = []
+
       for file in files
         type = mime.lookup file
 
@@ -81,8 +99,10 @@ class Glob
           @_debug "eachAsync: files of type #{type} are not supported in synchronous mode"
 
       i = 0
+
+      jsonFiles = jsonFiles[skip...(skip+limit)]
       m = jsonFiles.length
-      for jsonFile in csvFiles
+      for jsonFile in jsonFiles
         i++
         isLast = (i is m)
         do (jsonFile, isLast) =>

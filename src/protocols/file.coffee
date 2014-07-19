@@ -49,10 +49,12 @@ class File
 
     str = fs.readFileSync @_path, 'utf8'
     lines = str.split('\n')
-    i = 0
-    for line in lines
+    skip = @_fussy._skip ? 0
+    limit = @_fussy._limit ? Infinity
+
+    for line in lines[skip...(skip+limit)]
       cb line, no
-      i += 1
+
     cb undefined, yes
     return
 
@@ -60,14 +62,22 @@ class File
   eachAsync: (cb) ->
     @_debug "eachAsync(cb)"
 
+    skip = @_fussy._skip ? 0
+    limit = @_fussy._limit ? Infinity
+
     _readInputStream = (instream, cb) =>
       outstream = new (require 'stream')
       rl = require('readline').createInterface instream, outstream
 
       i = 0
       rl.on 'line', (line) ->
-        cb line, no
         i += 1
+        if i <= skip
+          return
+        if i < (skip + limit)
+          cb line, no
+        else
+          @debug "todo: stop read stream"
 
       rl.on 'close', ->
         cb undefined, yes
