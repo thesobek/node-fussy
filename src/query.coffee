@@ -177,10 +177,11 @@ class Query
 
     output = {}
     for key, options of result
+      @_debug "_toBestFn: #{key}: #{pretty options}"
       isNumerical = types[key] is 'Number'
 
       if isNumerical
-
+        #@_debug "isNumerical"
         sum = 0
         for option, weight of options
           sum += weight
@@ -188,7 +189,16 @@ class Query
         output[key] = 0
         for option, weight of options
           option = (Number) option
-          output[key] += option * (weight / sum)
+          #@_debug "option: #{option}, weight: #{weight}, sum: #{sum}"
+          #@_debug "A output[key]: #{pretty output[key]}"
+          if sum > 0
+            #@_debug "sum: #{sum}"
+            ws = weight / sum
+            output[key] += option * ws
+          else
+            #@_debug "weight: #{weight}"
+            output[key] += option * weight
+          #@_debug "B output[key]: #{pretty output[key]}"
 
       else
         output[key] = []

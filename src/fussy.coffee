@@ -194,7 +194,8 @@ class Fussy
 
       if utils.isString value
         @_debug "_extract: String"
-        facts.push ['String', key, value]
+        if value isnt ""
+          facts.push ['String', key, value]
 
       else if utils.isArray value
         @_debug "_extract: Array"

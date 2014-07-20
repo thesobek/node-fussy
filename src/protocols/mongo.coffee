@@ -126,6 +126,7 @@ class Mongo
           throw err if err
           if item
             @_debug "                          - returned an item"
+            console.log "- item: #{i}"
             cb item, no
             fn = -> _readCursor i+1
             setTimeout fn, delay
