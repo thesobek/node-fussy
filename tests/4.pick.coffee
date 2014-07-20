@@ -1,3 +1,8 @@
+chai = require 'chai'
+should = chai.should()
+expect = chai.expect
+
+
 Fussy = require 'fussy'
 
 echo = (x) -> console.log Fussy.pretty x

@@ -1,3 +1,8 @@
+chai = require 'chai'
+should = chai.should()
+expect = chai.expect
+
+
 Fussy = require 'fussy'
 
 echo = (x) -> console.log Fussy.pretty x
@@ -14,62 +19,64 @@ challenge =
   age: 18
   category: undefined
 
-res = Fussy(config.data.testUsers)
-  .skip(0)
-  .solve challenge
+describe 'using the file (CSV) protocol', ->
 
-res.age.should.be.within 17.999, 18.001
-res.category.should.equal 'student'
+  it 'should work with default settings', ->
 
-Fussy(config.data.testUsers)
-  .skip(0)
-  .solve challenge, (res) ->
+    res = Fussy(config.data.testUsers)
+      .solve challenge
+
+    res.age.should.be.within 17.999, 18.001
+    res.category.should.equal 'student'
+
+    Fussy(config.data.testUsers)
+      .solve challenge, (res) ->
+
+        res.age.should.be.within 17.999, 18.001
+        res.category.should.equal 'student'
+
+  it 'shoudl work when skipping the first line and passin a schema', ->
+    ###
+    You can also pass a schema to map columns to json attributes, useful if you have
+    no header, or want better control over types
+    ###
+
+    db = Fussy(config.data.testUsers)
+      .skip(1)
+      .schema [
+          ['age', 'Number']
+          ['category','String']
+        ]
+
+    res = db.solve challenge
+
 
     res.age.should.be.within 17.999, 18.001
     res.category.should.equal 'student'
 
 
-###
-You can also pass a schema to map columns to json attributes, useful if you have
-no header, or want better control over types
-###
-
-db = Fussy(config.data.testUsers)
-  .skip(1)
-  .schema [
-      ['age', 'Number']
-      ['category','String']
+    db._schema.should.deep.equal [
+      [ 'age', 'Number' ]
+      [ 'category', 'String' ]
     ]
 
-res = db.solve challenge
 
 
-res.age.should.be.within 17.999, 18.001
-res.category.should.equal 'student'
+    db = Fussy(config.data.testUsers)
+      .skip(1)
+      .schema [
+          ['age', 'Number']
+          ['category','String']
+        ]
+
+    db.solve challenge, (res) ->
 
 
-db._schema.should.deep.equal [
-  [ 'age', 'Number' ]
-  [ 'category', 'String' ]
-]
+      res.age.should.be.within 17.999, 18.001
+      res.category.should.equal 'student'
 
 
-
-db = Fussy(config.data.testUsers)
-  .skip(1)
-  .schema [
-      ['age', 'Number']
-      ['category','String']
-    ]
-
-db.solve challenge, (res) ->
-
-
-  res.age.should.be.within 17.999, 18.001
-  res.category.should.equal 'student'
-
-
-  db._schema.should.deep.equal [
-    [ 'age', 'Number' ]
-    [ 'category', 'String' ]
-  ]
+      db._schema.should.deep.equal [
+        [ 'age', 'Number' ]
+        [ 'category', 'String' ]
+      ]
