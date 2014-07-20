@@ -45,7 +45,7 @@ class Glob
     @_debug "eachSync(cb)"
 
     files = glob.sync @_path
-
+    @_debug "eachSync: path: #{@_path}, files: #{pretty files}"
     skip = @_fussy._skip ? 0
     limit = @_fussy._limit ? Infinity
 
@@ -55,7 +55,7 @@ class Glob
       type = mime.lookup file
 
       if type is 'application/json'
-        jsonFiles.push type
+        jsonFiles.push file
 
       else
         @_debug "eachSync: files of type #{type} are not supported in synchronous mode"
@@ -69,9 +69,9 @@ class Glob
 
       obj = undefined
       try
-        obj = JSON.parse fs.readFileSync file, 'utf8'
+        obj = JSON.parse fs.readFileSync jsonFile, 'utf8'
       catch exc
-        @_debug "eachSync: couldn't read json file #{file}: #{exc}"
+        @_debug "eachSync: couldn't read json file #{jsonFile}: #{exc}"
         continue
 
       if obj?
@@ -93,7 +93,7 @@ class Glob
         type = mime.lookup file
 
         if type is 'application/json'
-          jsonFiles.push type
+          jsonFiles.push file
 
         else
           @_debug "eachAsync: files of type #{type} are not supported in synchronous mode"
@@ -106,7 +106,7 @@ class Glob
         i++
         isLast = (i is m)
         do (jsonFile, isLast) =>
-          fs.readFile schema, 'utf8', (err, data) =>
+          fs.readFile jsonFile, 'utf8', (err, data) =>
             if err
               @_debug "eachAsync: coudln't read JSON file: #{err}"
               cb undefined, isLast
