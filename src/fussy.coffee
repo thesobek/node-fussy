@@ -284,49 +284,71 @@ class Fussy
     @_onCompleteCb = onCompleteCb
     @
 
+  ###
+  Create a new single query.
+  Maybe you shouldn't use this directly?
+
+  ###
   query: (query) ->
     unless query?
       throw "Error: Fussy.query cannot be called without parameters".red
-    new Query @, query
+    new Query @, [query], yes
 
   ###
   Repair an object in-place
   Only fields that are undefined will be filled, others will be left untouched
   ###
-  repair: (obj, cb) ->
-    unless obj?
+  repair: (objects, cb) ->
+    unless objects?
       throw "Error: Fussy.repair cannot be called without parameters".red
-    #if utils.isArray(obj) and obj.length > 0
+    #if utils.isArray(objects) and obj.length > 0
 
-    query = new Query @,
-      replace: obj
-      select: Object.keys(obj)
-      where: do ->
-        newObj = {}
-        for key in Object.keys(obj)
-          if obj[key]?
-            newObj[key] = obj[key]
-        newObj
+    isSingle = ! utils.isArray objects
+
+    if isSingle
+      objects = [ objects ]
+
+    batch = for obj in objects
+
+      replace = obj
+      select = Object.keys obj
+      where = {}
+
+      for key in select
+        if obj[key]?
+          where[key] = obj[key]
+
+      { replace, select, where }
+
+    query = new Query @, batch, isSingle
 
     query.replace cb
 
   ###
   Return the solution to an uncomplete json object
   ###
-  solve: (obj, cb) ->
-    unless obj?
+  solve: (objects, cb) ->
+    unless objects?
       throw "Error: Fussy.solve cannot be called without parameters".red
 
-    @_debug "solve(obj, cb)"
-    query = new Query @,
-      select: Object.keys(obj)
-      where: do ->
-        newObj = {}
-        for key in Object.keys(obj)
-          if obj[key]?
-            newObj[key] = obj[key]
-        newObj
+    isSingle = ! utils.isArray objects
 
+    if isSingle
+      objects = [ objects ]
+
+    @_debug "solve(objects, cb)"
+    batch = for obj in objects
+
+      select = Object.keys obj
+      where = {}
+
+      for key in select
+        if obj[key]?
+          where[key] = obj[key]
+
+      { select, where }
+
+    query = new Query @, batch, isSingle
     query.best cb
 
   ###
@@ -337,19 +359,23 @@ class Fussy
   pick: (obj, n, cb) ->
 
     @_debug "pick(obj, n, cb)"
-    n = if utils.isNumber(n) then n else 1
+    n  = if utils.isNumber(n)   then n else 1
     cb = if utils.isFunction(n) then n else cb
 
-    obj ?= {}
+    single = do ->
 
-    query = new Query @,
-      select: Object.keys(obj)
-      where: do ->
-        newObj = {}
-        for key in Object.keys(obj)
-          if obj[key]?
-            newObj[key] = obj[key]
-        newObj
+      obj ?= {}
+
+      select = Object.keys obj
+      where = {}
+
+      for key in select
+        if obj[key]?
+          where[key] = obj[key]
+
+      { select, where }
+
+    query = new Query @, [ single ], yes
 
     query.pick n, cb
 
@@ -358,16 +384,21 @@ class Fussy
   ###
   generate: (obj, cb) ->
     @_debug "generate(obj, cb)"
-    obj ?= {}
 
-    query = new Query @,
-      select: Object.keys(obj)
-      where: do ->
-        newObj = {}
-        for key in Object.keys(obj)
-          if obj[key]?
-            newObj[key] = obj[key]
-        newObj
+    single = do ->
+
+      obj ?= {}
+
+      select = Object.keys obj
+      where = {}
+
+      for key in select
+        if obj[key]?
+          where[key] = obj[key]
+
+      { select, where }
+
+    query = new Query @, [ single ], yes
 
     query.generate cb
 
@@ -385,6 +416,18 @@ class Fussy
       @_debug "test: sync"
       @eachFeaturesSync (item, eof) =>
         0
+
+  ###
+
+  ###
+  similar: (obj, n, cb) ->
+
+    n  = if utils.isNumber(n)   then n else 1
+    cb = if utils.isFunction(n) then n else cb
+
+    @_debug "similar(obj, #{pretty n}, cb)"
+
+    throw "Not Implemented"
 
 module.exports = (input) ->
   new Fussy input, module.exports._debugEnabled

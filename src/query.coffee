@@ -14,29 +14,31 @@ text    = require './text'
 pretty = utils.pretty
 
 class Query
-  constructor: (@_fussy, q) ->
+  constructor: (@_fussy, queries, isSingle) ->
     @_error = undefined
     @_mode = 'all'
+    @_isSingle = isSingle
 
-    if q.select?
+    @_queries = for q in queries
+      if q.select?
 
-      if utils.isString q.select
-        tmp = {}
-        tmp[q.select] = []
-        q.select = tmp
+        if utils.isString q.select
+          tmp = {}
+          tmp[q.select] = []
+          q.select = tmp
 
-      else if utils.isArray q.select
-        tmp = {}
-        for select in q.select
-          tmp[select] = []
-        q.select = tmp
+        else if utils.isArray q.select
+          tmp = {}
+          for select in q.select
+            tmp[select] = []
+          q.select = tmp
 
-      # else we assume this is a correctly formatted object
+        # else we assume this is a correctly formatted object
 
-    unless utils.isArray q.where
-      q.where = [ q.where ]
+      unless utils.isArray q.where
+        q.where = [ q.where ]
 
-    @_query = q
+      q
 
   debug: (enabled) ->
     @_debugEnabled = enabled
@@ -48,214 +50,215 @@ class Query
     console.log "Query".green + "::".grey + x
 
 
-  _reduceFn: (reduction, features) ->
-    @_debug "reduceFn(reduction, features)" +" // deep comparison".grey
+  _reduceFn: (requests, features) ->
+    @_debug "reduceFn(requests, features)" +" // deep comparison".grey
     unless features?
       @_debug "reduceFn: end condition"
-      return reduction
+      return requests
 
-    query = reduction.query
-    #@_debug "reduction: " + pretty reduction
-    #@_debug "features: "+pretty features
+    for request in requests
 
-    weight = 0
-    factors = []
+      weight = 0
+      factors = []
 
-    nb_feats = 0
-    #@_debug "query.where: "+pretty where
+      nb_feats = 0
+      #@_debug "request.query.where: "+pretty request.query.where
 
-    for where in query.where
-      #@_debug "where: " + pretty where
-      depth = 0
-      complexity = 0
+      for where in request.query.where
+        #@_debug "where: " + pretty where
+        depth = 0
+        complexity = 0
 
-      for [type, key, value] in features
+        for [type, key, value] in features
 
-        #@_debug [type, key, value]
+          #@_debug [type, key, value]
 
-        if key of where
+          if key of where
 
-          whereValues = if utils.isArray where[key]
-              where[key]
-            else
-              [where[key]]
+            whereValues = if utils.isArray where[key]
+                where[key]
+              else
+                [where[key]]
 
-          match = no
+            match = no
 
-          for whereValue in whereValues
+            for whereValue in whereValues
 
-            switch type
-              when 'String'
-                value = "#{value}"
-                whereValue = "#{whereValue}"
-                if ' ' in value or ' ' in whereValue
-                  [_depth,_nb_feats] = text.distance value, whereValue
-                  depth += _depth
-                  nb_feats += _nb_feats
-                  match = yes
-                else
-                  if value is whereValue
+              switch type
+                when 'String'
+                  value = "#{value}"
+                  whereValue = "#{whereValue}"
+                  if ' ' in value or ' ' in whereValue
+                    [_depth,_nb_feats] = text.distance value, whereValue
+                    depth += _depth
+                    nb_feats += _nb_feats
+                    match = yes
+                  else
+                    if value is whereValue
+                      depth += 1
+                      match = yes
+
+                when 'Number'
+                  whereValue = (Number) whereValue
+                  if !isNaN(whereValue) and isFinite(whereValue)
+                    delta = Math.abs value - whereValue
+                    # bad performance if we use 2/1 on sonar dataset
+                    depth += 1 / (1 + delta)
+                    match = yes
+
+
+                when 'Boolean'
+                  if ((Boolean) value) is ((Boolean) whereValue)
                     depth += 1
                     match = yes
 
-              when 'Number'
-                whereValue = (Number) whereValue
-                if !isNaN(whereValue) and isFinite(whereValue)
-                  delta = Math.abs value - whereValue
-                  # bad performance if we use 2/1 on sonar dataset
-                  depth += 1 / (1 + delta)
-                  match = yes
+                else
+                  @_debug "type #{type} not supported"
 
+            if match
+              nb_feats += 1
 
-              when 'Boolean'
-                if ((Boolean) value) is ((Boolean) whereValue)
-                  depth += 1
-                  match = yes
+        # these parameters depends on the plateform
+        depth *= Math.min 6, 300 / nb_feats
+        weight += 10 ** Math.min 300, depth
 
-              else
-                @_debug "type #{type} not supported"
+      for [type, key, value] in features
+        #@_debug "key: "+key
 
-          if match
-            nb_feats += 1
+        if request.query.select?
+          unless key of request.query.select
+            continue
 
-      # these parameters depends on the plateform
-      depth *= Math.min 6, 300 / nb_feats
-      weight += 10 ** Math.min 300, depth
+        #@_debug "here"
+        unless key of request.types
+          request.types[key] = type
 
-    for [type, key, value] in features
-      #@_debug "key: "+key
+        # TODO put the 4 following lines before the "continue unless"
+        # if you want to catch all results
+        unless key of request.result
+          request.result[key] = {}
 
-      if query.select?
-        unless key of query.select
-          continue
+        unless value of request.result[key]
+          request.result[key][value] = 0
 
-      #@_debug "here"
-      unless key of reduction.types
-        reduction.types[key] = type
+        #@_debug "match for #{key}: #{query.select[key]}"
 
-      # TODO put the 4 following lines before the "continue unless"
-      # if you want to catch all results
-      unless key of reduction.result
-        reduction.result[key] = {}
-
-      unless value of reduction.result[key]
-        reduction.result[key][value] = 0
-
-
-      #@_debug "match for #{key}: #{query.select[key]}"
-
-      match = no
-      if query.select?
-        if utils.isArray query.select[key]
-          #@_debug "array"
-          if query.select[key].length
-            if value in query.select[key]
-              #@_debug "SELECT match in array!"
+        match = no
+        if request.query.select?
+          if utils.isArray request.query.select[key]
+            #@_debug "array"
+            if request.query.select[key].length
+              if value in request.query.select[key]
+                #@_debug "SELECT match in array!"
+                match = yes
+            else
+              #@_debug "empty"
               match = yes
           else
-            #@_debug "empty"
-            match = yes
+            #@_debug "not array"
+            if value is request.query.select[key]
+              #@_debug "SELECT match single value!"
+              match = yes
         else
-          #@_debug "not array"
-          if value is query.select[key]
-            #@_debug "SELECT match single value!"
-            match = yes
-      else
-        match = yes
+          match = yes
 
-      if match
-        reduction.result[key][value] += weight
+        if match
+          request.result[key][value] += weight
 
     @_debug "_reduceFn: reducing"
-    #@_debug pretty reduction
-    return reduction
+    #@_debug pretty requests
+    return requests
 
 
-  _toBestFn: (args, cb) ->
-    @_debug "_toBestFn(args)"
-    {result, types} = args
+  _toBestFn: (inputs, cb) ->
+    @_debug "_toBestFn(inputs)"
 
-    output = {}
-    for key, options of result
-      @_debug "_toBestFn: #{key}: #{pretty options}"
-      isNumerical = types[key] is 'Number'
+    outputs = for input in inputs
+      {result, types} = input
+      output = {}
+      for key, options of result
+        @_debug "_toBestFn: #{key}: #{pretty options}"
+        isNumerical = types[key] is 'Number'
 
-      if isNumerical
-        #@_debug "isNumerical"
-        sum = 0
-        for option, weight of options
-          sum += weight
+        if isNumerical
+          #@_debug "isNumerical"
+          sum = 0
+          for option, weight of options
+            sum += weight
 
-        output[key] = 0
-        for option, weight of options
-          option = (Number) option
-          #@_debug "option: #{option}, weight: #{weight}, sum: #{sum}"
-          #@_debug "A output[key]: #{pretty output[key]}"
-          if sum > 0
-            #@_debug "sum: #{sum}"
-            ws = weight / sum
-            output[key] += option * ws
-          else
-            #@_debug "weight: #{weight}"
-            output[key] += option * weight
-          #@_debug "B output[key]: #{pretty output[key]}"
+          output[key] = 0
+          for option, weight of options
+            option = (Number) option
+            #@_debug "option: #{option}, weight: #{weight}, sum: #{sum}"
+            #@_debug "A output[key]: #{pretty output[key]}"
+            if sum > 0
+              #@_debug "sum: #{sum}"
+              ws = weight / sum
+              output[key] += option * ws
+            else
+              #@_debug "weight: #{weight}"
+              output[key] += option * weight
+            #@_debug "B output[key]: #{pretty output[key]}"
 
-      else
-        output[key] = []
-        for option, weight of options
-          if types[key] is 'Boolean'
-            option = (Boolean) option
-          output[key].push [option, weight]
-        output[key].sort (a,b) -> b[1] - a[1]
-        best = output[key][0] # get the best
-        output[key] = best[0] # get the value
+        else
+          output[key] = []
+          for option, weight of options
+            if types[key] is 'Boolean'
+              option = (Boolean) option
+            output[key].push [option, weight]
+          output[key].sort (a,b) -> b[1] - a[1]
+          best = output[key][0] # get the best
+          output[key] = best[0] # get the value
+      output
 
     if cb?
-      cb output
+      cb outputs
       return undefined
     else
-      return output
+      return outputs
 
 
   # convert a key:{ opt_a:3, opt_b: 4}
-  _toAllFn: (args, cb) ->
+  _toAllFn: (requests, cb) ->
 
-    @_debug "_toAllFn(args, cb?)"+"  // cast output map to typed array"
+    @_debug "_toAllFn(requests, cb?)"+"  // cast output map to typed array"
 
-    __toAllFn = (_args) =>
+    __toAllFn = =>
       @_debug "_toAllFn:__toAllFn()"
+      # note: we remplace list elements inline to avoid useless copies
+      for request in requests
+        for key, options of request.result
+          sorted = []
+          if request.types[key] is 'Number'
+            @_debug "_toAllFn:__toAllFn: Number -> #{key}"
+            for option, weight of options
+              #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
+              sorted.push [((Number) option),  weight]
+              #@_debug "pushed: #{all}"
 
-      for key, options of _args.result
-        sorted = []
-        if _args.types[key] is 'Number'
-          @_debug "_toAllFn:__toAllFn: Number -> #{key}"
-          for option, weight of options
-            #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
-            sorted.push [((Number) option),  weight]
-            #@_debug "pushed: #{all}"
+          else if request.types[key] is 'Boolean'
+            @_debug "_toAllFn:__toAllFn: Boolean -> #{key}"
+            for option, weight of options
+              #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
+              sorted.push [((Boolean) option), weight]
+          else
+            @_debug "_toAllFn:__toAllFn: String -> #{key}"
+            for option, weight of options
+              #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
+              sorted.push [option, weight]
 
-        else if _args.types[key] is 'Boolean'
-          @_debug "_toAllFn:__toAllFn: Boolean -> #{key}"
-          for option, weight of options
-            #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
-            sorted.push [((Boolean) option), weight]
-        else
-          @_debug "_toAllFn:__toAllFn: String -> #{key}"
-          for option, weight of options
-            #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
-            sorted.push [option, weight]
-
-        _args.result[key] = sorted.sort (a,b) -> b[1] - a[1]
-
-      _args.result
+          request.result[key] = sorted.sort (a,b) -> b[1] - a[1]
+        return
+      return #
+      #requests
 
     if cb?
-      result = __toAllFn args
-      cb result
+      __toAllFn()
+      cb requests
       return undefined
     else
-      result = __toAllFn args
-      return result
+      __toAllFn()
+      return requests
 
 
   trigger: (cb) -> if cb? then @_async(cb) else @_sync()
@@ -290,30 +293,35 @@ class Query
   _sync: ->
     @_debug "_sync()"
 
-    ctx =
-      query: @_query
+    unless @_queries.length > 0
+      throw "error, no query is empty"
+
+    requests = for query in @_queries
+      query: query
       result: {}
       types: {}
 
     @_debug "_sync: @_fussy.eachFeatureSync:"
     @_fussy.eachFeaturesSync (features, isLastItem) =>
       @_debug "_sync: @_fussy.eachFeatureSync(#{pretty features}, #{pretty isLastItem})"
-      ctx = @_reduceFn ctx, features
+      requests = @_reduceFn requests, features
 
-    results = switch @_mode
+    output = switch @_mode
       when 'all'
         @_debug "_sync: all: @_toAllFn()"
-        @_toAllFn ctx
+        @_toAllFn requests
 
       when 'pick'
         @_debug "_sync: pick"
+
         res = for i in [0...@_pick_instances]
-          obj = {}
-          for key, options of ctx.result
+          firstRequest = requests[0]
+          picked = {}
+          for key, options of firstRequest.result
             #@_debug pretty options
             option = deck.pick options
-            obj[key] = option
-          obj
+            picked[key] = option
+          picked
 
         if utils.isArray res
           if res.length is 1
@@ -323,31 +331,32 @@ class Query
       when 'generate'
         @_debug "_sync: generate"
         =>
-          obj = {}
-          for key, options of ctx.result
-            #@_debug pretty options
-            option = deck.pick options
-            obj[key] = option
-          obj
+          firstRequest = requests[0]
+          generated = {}
+          for key, options of firstRequest.result
+            generated[key] = deck.pick options
+          generated
 
       when 'best'
-        @_debug "_sync: best: @_toBestFn(#{pretty ctx})"
-        @_toBestFn ctx
+        @_debug "_sync: best: @_toBestFn(#{pretty requests})"
+        @_toBestFn requests
 
       when 'replace'
-        @_debug "_sync: fix: @_toBestFn(#{pretty ctx})"
-        result = @_toBestFn ctx
+        @_debug "_sync: fix: @_toBestFn(#{pretty requests})"
+        results = @_toBestFn requests
 
-        obj = ctx.query.replace
-        for k,v of result
-          if !obj[k]?
-            obj[k] = v
-        obj
+        replaced = for request in requests
 
+          for k,v of result
+            if !request.query.replace[k]?
+              request.query.replace[k] = v
 
+          request.query.replace
 
-    @_debug "_sync: return #{pretty results}"
-    results
+        replaced
+
+    @_debug "_sync: return #{pretty output}"
+    output
 
   onError: (cb) ->
     @_debug "onError(cb)"
@@ -358,9 +367,11 @@ class Query
 
     @_debug "_async(cb)"
 
+    unless @_queries.length > 0
+      throw "error, no query is empty"
 
-    ctx =
-      query: @_query
+    requests = for query in @_queries
+      query: query
       result: {}
       types: {}
 
@@ -368,16 +379,16 @@ class Query
     @_fussy.eachFeaturesAsync (features, isLastItem) =>
       @_debug "_async: @_fussy.eachFeatureAsync(#{pretty features}, #{pretty isLastItem})"
 
-      @_debug "_async: @_reduceFn(ctx, features)"
-      ctx = @_reduceFn ctx, features
+      @_debug "_async: @_reduceFn(requests, features)"
+      results = @_reduceFn requests, features
       return unless isLastItem
       @_debug "_async: isLastItem == true"
 
       switch @_mode
         when 'all'
 
-          @_debug "_async: all: @_toAllFn(ctx, cb)"
-          @_toAllFn ctx, (results) =>
+          @_debug "_async: all: @_toAllFn(requests, cb)"
+          @_toAllFn requests, (results) =>
 
             @_debug "_async: all: cb(results)"
             cb results
@@ -385,12 +396,14 @@ class Query
         when 'pick'
           @_debug "_sync: pick"
           res = for i in [0...@_pick_instances]
-            obj = {}
-            for key, options of ctx.result
+            firstRequest = requests[0]
+            picked = {}
+            for key, options of firstRequest.result
               #@_debug pretty options
               option = deck.pick options
-              obj[key] = option
-            obj
+              picked[key] = option
+            picked
+
           if utils.isArray res
             if res.length is 1
               res = res[0]
@@ -399,30 +412,31 @@ class Query
         when 'generate'
           @_debug "_async: generate"
           cb =>
-            obj = {}
-            for key, options of ctx.result
-              #@_debug pretty options
-              option = deck.pick options
-              obj[key] = option
-            obj
+            firstRequest = requests[0]
+            generated = {}
+            for key, options of firstRequest.result
+              generated[key] = deck.pick options
+            generated
 
         when 'best'
-          @_debug "_async: best: @_toBestFn(#{pretty ctx})"
-          @_toBestFn ctx, (results) =>
+          @_debug "_async: best: @_toBestFn(#{pretty requests})"
+          @_toBestFn requests, (bests) =>
 
-            @_debug "_async: best: cb(results)"
-            cb results
+            @_debug "_async: best: cb(bests)"
+            cb bests
 
         when 'replace'
-          @_debug "_async: replace: @_toBestFn(#{pretty ctx})"
-          @_toBestFn ctx, (results) =>
+          @_debug "_async: replace: @_toBestFn(#{pretty requests})"
+          @_toBestFn requests, (results) =>
             @_debug "_async: replace: @_toBestFn: results: #{pretty results}"
-            obj = ctx.query.replace
-            for k,v of results
-              if !obj[k]?
-                obj[k] = v
-            obj
-            cb obj
+            replaced = for request in requests
+
+              for k,v of results
+                if !request.query.replace[k]?
+                  request.query.replace[k] = v
+              request.query.replace
+
+            cb replaced
 
 
     return undefined

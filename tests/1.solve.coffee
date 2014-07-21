@@ -8,11 +8,12 @@ Fussy = require 'fussy'
 
 echo = (x) -> console.log Fussy.pretty x
 
-describe 'solving a simple problem', ->
+#describe 'solving a simple problem', ->
 
-  it 'should return the result synchronously', ->
-
-    result = Fussy([
+#  it 'should return the result synchronously', ->
+do ->
+  do ->
+    db = Fussy [
         { age: 5,  category: 'children'   }
         { age: 15, category: 'pupil'      }
         { age: 17, category: 'student'    }
@@ -22,10 +23,12 @@ describe 'solving a simple problem', ->
         { age: 23, category: 'worker'     }
         { age: 25, category: 'worker'     }
         { age: 30, category: 'worker'     }
-      ]).solve(
-        age: 18
-        category: undefined
-      )
+      ]
+
+    result = db.solve
+      age: 18
+      category: undefined
+
 
     # should be left untouched
     result.age.should.be.within(17 - 0.001, 20 + 0.001)
@@ -34,3 +37,11 @@ describe 'solving a simple problem', ->
     ###
     will print: { age: 18, category: 'student' }
     ###
+    
+    [res1, res2] = db.solve [
+      { age: 18, category: undefined }
+      { age: 14, category: undefined }
+    ]
+
+    echo res1
+    echo res2
