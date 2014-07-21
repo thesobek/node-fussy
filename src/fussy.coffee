@@ -27,9 +27,12 @@ class Fussy
 
   constructor: (input, @_debugEnabled) ->
 
+    @_isFussy = yes
 
     @_skip = undefined # 0
     @_limit = undefined # Infinity
+
+    @_maps = [] # mapping functions
 
     @_firstLine = yes
     @_custom_schema = no
@@ -73,6 +76,23 @@ class Fussy
     @_debugEnabled = enabled
     @
 
+  ###
+  define a map function
+  a map take the object as argument, and must return another object
+  if you return undefined, then the object will be taken out of the flow
+  for all successive operations
+  ###
+  map: (fn) ->
+    @_maps.push fn
+    @
+
+  ###
+  filter the stream using a condition
+  ###
+  filter: (condition) ->
+    @_maps.push (obj) -> if condition(obj) then obj else undefined
+    @
+
   _debug: (x) ->
     return unless @_debugEnabled
     console.log "Fussy".yellow  + "::".grey + x
@@ -100,11 +120,12 @@ class Fussy
             tmp = csvString.parse(input)[0]
             i = 0
             for item in tmp
-              value = (Number) item
-              @_debug "_parse: #{value} = (Number) #{item}"
-              if value? and !isNaN(value) and isFinite(value)
-                @_schema[i][1] = 'Number'
-              i += 1
+              if item.match /^(?:\d+|\d+\.|\d+\.\d+|\.\d+)$/
+                value = (Number) item
+                @_debug "_parse: #{value} = (Number) #{item}"
+                if value? and !isNaN(value) and isFinite(value)
+                  @_schema[i][1] = 'Number'
+                i += 1
             @_debug "_parse: updated schema: #{pretty @_schema}"
           catch exc
             @_debug "_parse: schema update failed: #{exc}"
@@ -141,15 +162,17 @@ class Fussy
 
             @_custom_schema = yes
 
+            i = 0
             @_schema = for item in tmp
-              [item, 'String']
+              [ "col#{i++}", 'String']
 
-            inputIsProbablyHeader = do ->
+            inputIsProbablyHeader = do =>
               for item in tmp
-                value = (Number) item
-                if value? and !isNaN(value) and isFinite(value)
-                  @_debug "_parse: definitely not a header"
-                  return no
+                if item.match /^(?:\d+|\d+\.|\d+\.\d+|\.\d+)$/
+                  value = (Number) item
+                  if value? and !isNaN(value) and isFinite(value)
+                    @_debug "_parse: definitely not a header"
+                    return no
               @_debug "_parse: maybe a header?"
               return yes
 
@@ -254,14 +277,20 @@ class Fussy
 
       extracted = @_parse item
       return unless extracted
+
+      for map in @_maps
+        extracted = map extracted
+        return unless extracted
+
       features = @_extract extracted
       return unless features
       cb features, eof
 
+
   ###
   Call a function on each item, asynchronously
   ###
-  eachFeaturesAsync: (cb) =>
+  eachFeaturesAsync: (cb) ->
     @_debug "eachFeaturesAsync(cb)"
     @_engine.eachAsync (item, eof) =>
       @_debug "eachFeaturesAsync: @_engine.eachAsync (item=#{pretty item}, eof=#{pretty eof})"
@@ -274,6 +303,11 @@ class Fussy
 
       extracted = @_parse item
       return unless extracted
+
+      for map in @_maps
+        extracted = map extracted
+        return unless extracted
+
       features = @_extract extracted
       return unless features
       cb features, eof
@@ -295,6 +329,29 @@ class Fussy
     new Query @, [query], yes
 
   ###
+  synchronously return an array
+  ###
+  toArray: ->
+    arr = []
+    @_debug "toArray:"
+    @_engine.eachSync (item, eof) =>
+      @_debug "toArray: @_engine.eachSync (item=#{pretty item}, eof=#{pretty eof})"
+
+      console.log pretty item
+      return if eof
+
+      extracted = @_parse item
+      return unless extracted
+
+      for map in @_maps
+        extracted = map extracted
+        return unless extracted
+
+      arr.push extracted
+    arr
+
+
+  ###
   Repair an object in-place
   Only fields that are undefined will be filled, others will be left untouched
   ###
@@ -302,6 +359,9 @@ class Fussy
     unless objects?
       throw "Error: Fussy.repair cannot be called without parameters".red
     #if utils.isArray(objects) and obj.length > 0
+
+    if objects._isFussy
+      objects = objects.toArray()
 
     isSingle = ! utils.isArray objects
 
@@ -331,12 +391,17 @@ class Fussy
     unless objects?
       throw "Error: Fussy.solve cannot be called without parameters".red
 
+    # fow now, we can only process synchronous objects
+
+    if objects._isFussy
+      objects = objects.toArray()
+
     isSingle = ! utils.isArray objects
 
     if isSingle
       objects = [ objects ]
 
-    @_debug "solve(objects, cb)"
+    @_debug "solve: pre-processing objects"
     batch = for obj in objects
 
       select = Object.keys obj
@@ -416,6 +481,7 @@ class Fussy
       @_debug "test: sync"
       @eachFeaturesSync (item, eof) =>
         0
+
 
   ###
 
