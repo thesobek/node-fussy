@@ -47,7 +47,7 @@ class Mongo
   eachSync: (cb) ->
     @_debug 'eachSync'
 
-    throw "eachSync not supported for Mongo protocol"
+    throw "Fussy.Mongo: sync calls not supported, please use async"
 
     limit = @_fussy.limit()
     skip = @_fussy.skip()
@@ -105,6 +105,7 @@ class Mongo
 
       if skip?
         @_debug "eachAsync: skipping #{skip} results of collection"
+        console.log "SKIP #{skip}"
         cursor = cursor.skip skip
 
       if limit?
@@ -128,8 +129,10 @@ class Mongo
             @_debug "                          - returned an item"
             console.log "- item: #{i}"
             cb item, no
-            fn = -> _readCursor i+1
-            setTimeout fn, delay
+            # BUG the timeout calls all nextObject at once, filling the memory..
+            #fn = -> _readCursor i+1
+            #setTimeout fn, delay
+            _readCursor i+1
           else
             @_debug "                          - returned nothing: end reached"
             cb undefined, yes

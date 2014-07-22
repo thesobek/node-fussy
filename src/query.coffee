@@ -2,6 +2,7 @@
 
 # standard node library
 util   = require 'util'
+Map = require 'map'
 
 # third party modules
 colors    = require 'colors'
@@ -18,6 +19,7 @@ class Query
     @_error = undefined
     @_mode = 'all'
     @_isSingle = isSingle
+    @_maxOptions = 5 # we need to limit nb of options to save memory
 
     @_queries = for q in queries
       if q.select?
@@ -174,7 +176,7 @@ class Query
     @_debug "_toBestFn(inputs)"
 
     outputs = for input in inputs
-      {result, types} = input
+      {result, types, query} = input
       output = {}
       for key, options of result
         @_debug "_toBestFn: #{key}: #{pretty options}"
@@ -207,9 +209,13 @@ class Query
               option = (Boolean) option
             output[key].push [option, weight]
           output[key].sort (a,b) -> b[1] - a[1]
+          output[key][...@_maxOptions]
           best = output[key][0] # get the best
           output[key] = best[0] # get the value
-      output
+
+      query: query
+      result: output
+      types: types
 
     if cb?
       cb outputs
@@ -247,7 +253,9 @@ class Query
               #@_debug "_toAllFn:__toAllFn: [#{key}, #{(Number) option}, #{weight}]"
               sorted.push [option, weight]
 
-          request.result[key] = sorted.sort (a,b) -> b[1] - a[1]
+          sorted = sorted.sort (a,b) -> b[1] - a[1]
+          sorted = sorted[...@_maxOptions] # limit size
+          request.result[key] = sorted
         return
       return #
       #requests
@@ -273,9 +281,9 @@ class Query
     @_mode = 'best'
     @trigger cb
 
-  replace: (cb) ->
-    @_debug "replace(cb?)"
-    @_mode = 'replace'
+  repair: (cb) ->
+    @_debug "repair(cb?)"
+    @_mode = 'repair'
     @trigger cb
 
   pick: (n, cb) ->
@@ -289,7 +297,6 @@ class Query
     @_mode = 'generate'
     @trigger cb
 
-  # toArray = get sync
   _sync: ->
     @_debug "_sync()"
 
@@ -341,19 +348,19 @@ class Query
         @_debug "_sync: best: @_toBestFn(#{pretty requests})"
         @_toBestFn requests
 
-      when 'replace'
+      when 'repair'
         @_debug "_sync: fix: @_toBestFn(#{pretty requests})"
         results = @_toBestFn requests
 
-        replaced = for request in requests
+        repaired = for request in results
 
-          for k,v of result
-            if !request.query.replace[k]?
-              request.query.replace[k] = v
+          for k,v of request.result
+            if !request.query.repair[k]?
+              request.query.repair[k] = v
 
-          request.query.replace
+          request.query.repair
 
-        replaced
+        repaired
 
     @_debug "_sync: return #{pretty output}"
     output
@@ -425,18 +432,19 @@ class Query
             @_debug "_async: best: cb(bests)"
             cb bests
 
-        when 'replace'
-          @_debug "_async: replace: @_toBestFn(#{pretty requests})"
+        when 'repair'
+          @_debug "_async: repair: @_toBestFn(#{pretty requests})"
           @_toBestFn requests, (results) =>
-            @_debug "_async: replace: @_toBestFn: results: #{pretty results}"
-            replaced = for request in requests
+            @_debug "_async: repair: @_toBestFn: results: #{pretty results}"
+            #console.log pretty results
+            repaired = for request in results
 
-              for k,v of results
-                if !request.query.replace[k]?
-                  request.query.replace[k] = v
-              request.query.replace
+              for k,v of request.result
+                if !request.query.repair[k]?
+                  request.query.repair[k] = v
+              request.query.repair
 
-            cb replaced
+            cb repaired
 
 
     return undefined

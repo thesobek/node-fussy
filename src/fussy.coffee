@@ -22,12 +22,13 @@ Query  = require './query'
 
 pretty = utils.pretty
 
+NOOP = undefined
 
 class Fussy
 
   constructor: (input, @_debugEnabled) ->
 
-    @_isFussy = yes
+    #@_isFussy = yes
 
     @_skip = undefined # 0
     @_limit = undefined # Infinity
@@ -86,11 +87,42 @@ class Fussy
     @_maps.push fn
     @
 
+
+  ###
+  iterate over each object
+  the return value of the iterator is ignored
+  ###
+  each: (fn) ->
+    @_maps.push (obj) -> fn(obj); obj
+    @
+
   ###
   filter the stream using a condition
   ###
   filter: (condition) ->
     @_maps.push (obj) -> if condition(obj) then obj else undefined
+    @
+
+
+  ###
+  removes null fields, empty strings, NaN..
+  ###
+  clean: ->
+    @_maps.push (obj) ->
+      for key in Object.keys obj
+        value = obj[key]
+        # leave fields that are "undefined": this is our query!
+        if value is null
+          delete obj[key]
+        else if utils.isString value
+          if value.length < 1
+            delete obj[key]
+          else if value.match /^(\\r|\\n)$/
+            delete obj[key]
+        if utils.isNumber value
+          if isNaN(value) or !isFinite(value)
+            delete obj[key]
+      obj
     @
 
   _debug: (x) ->
@@ -106,7 +138,7 @@ class Fussy
 
     #@_debug "_parse(input) " +"  // convert raw chunk into full featured object".grey
 
-    output = undefined
+    output = input
 
     # do we have a schema defined?
     if @_schema?
@@ -142,8 +174,39 @@ class Fussy
             @_debug "_parse: couldn't parse json input. I could use the object as is, but since you defined a schema I prefer to skip it"
             output = undefined
       else
-        @_debug "_parse: object is not a string, so we won't parse it"
-        output = input
+        @_debug "_parse: object is not a string, using schema to map named symbols.."
+
+        for k,v of input
+
+          for col in @_schema
+            if col[0] is k
+              #console.log "match"
+              #console.log pretty col
+              #@_debug col
+              type = col[1]
+
+              if type?
+                if utils.isString type
+                  switch type
+                    when 'Symbol'
+                      output[k] = "#{v}"
+                    when 'Number'
+                      output[k] = (Number) v
+                    when 'Boolean'
+                      output[k] = if v then true else false
+                    when 'String'
+                      output[k] = "#{v}"
+                    else
+                      output[k] = "#{v}"
+                else
+
+                  tmp = type[v]
+                  #@_debug "type! #{pretty type}, v: #{v}, tmp: #{tmp}"
+                  if tmp?
+                    output[k] = tmp
+
+        #console.log pretty output
+        output
 
     else if utils.isString input
       @_debug "_parse: no schema, trying to parse json from string"
@@ -331,13 +394,36 @@ class Fussy
   ###
   synchronously return an array
   ###
-  toArray: ->
+  toArray: (cb) ->
+
+    if cb?
+      @_debug "toArray: async"
+      arr = []
+      @_engine.eachAsync (item, eof) =>
+        @_debug "toArray: @_engine.eachSync (item=#{pretty item}, eof=#{pretty eof})"
+
+        #console.log pretty item
+        if eof
+          cb arr
+          return
+
+        extracted = @_parse item
+        return unless extracted
+
+        for map in @_maps
+          extracted = map extracted
+          return unless extracted
+
+        arr.push extracted
+        
+      return
+
     arr = []
-    @_debug "toArray:"
+    @_debug "toArray: sync"
     @_engine.eachSync (item, eof) =>
       @_debug "toArray: @_engine.eachSync (item=#{pretty item}, eof=#{pretty eof})"
 
-      console.log pretty item
+      #console.log pretty item
       return if eof
 
       extracted = @_parse item
@@ -360,7 +446,7 @@ class Fussy
       throw "Error: Fussy.repair cannot be called without parameters".red
     #if utils.isArray(objects) and obj.length > 0
 
-    if objects._isFussy
+    if objects.toArray?
       objects = objects.toArray()
 
     isSingle = ! utils.isArray objects
@@ -370,7 +456,7 @@ class Fussy
 
     batch = for obj in objects
 
-      replace = obj
+      repair = obj
       select = Object.keys obj
       where = {}
 
@@ -378,11 +464,11 @@ class Fussy
         if obj[key]?
           where[key] = obj[key]
 
-      { replace, select, where }
+      { repair, select, where }
 
     query = new Query @, batch, isSingle
 
-    query.replace cb
+    query.repair cb
 
   ###
   Return the solution to an uncomplete json object
@@ -393,7 +479,7 @@ class Fussy
 
     # fow now, we can only process synchronous objects
 
-    if objects._isFussy
+    if objects.toArray?
       objects = objects.toArray()
 
     isSingle = ! utils.isArray objects
@@ -468,7 +554,7 @@ class Fussy
     query.generate cb
 
   ###
-  test some data (this is a WIP, to replace the bench object)
+  test some data (this is a WIP, to repair the bench object)
   ###
   test: (input, cb) ->
     testDataset = module.exports.input input
